@@ -67,6 +67,7 @@ type Picker = (choices: readonly string[]) => number;
 
 function talk(sys: InteractionSystem, id: string, pick: Picker = (c) => c.length - 1): string[] {
   const def = sys.interactables.find((i) => i.id === id)!;
+  sys.setIndoor(def.indoor ?? false);
   sys.updateTarget({ x: def.position.x, z: def.position.z - 1, heading: 0 });
   expect(sys.target?.id).toBe(id);
   sys.interact();
@@ -553,8 +554,8 @@ describe('屋根葺き当日の立ち位置と、情報の整理', () => {
     }
     const map = buildReachability([...world, ...npcColliders(npcs), ...stageColliders], WALK_BOUNDS, PLAYER_START.position, DEFAULT_PLAYER_TUNING.radius);
     for (const n of npcs) expect(map.nearestReachable(n.position), n.id).toBeLessThan(n.range - 0.4);
-    // 結帳・作業台・サエ家の屋根（当日は「作業中」）にも行ける
-    for (const id2 of ['ledger', 'planTable', 'saeRoof']) {
+    // 作業台・サエ家の屋根（当日は「作業中」）・サエ家の入口にも行ける（結帳は室内：tests/phase5_5.test.ts）
+    for (const id2 of ['planTable', 'saeRoof', 'saeDoor']) {
       const def = INTERACTABLES.find((i) => i.id === id2)!;
       expect(map.nearestReachable(def.position)).toBeLessThan(def.range - 0.4);
     }

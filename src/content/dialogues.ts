@@ -1,5 +1,9 @@
 import type { DialogueChoice, DialogueScript } from '../dialogue/types';
 import type { Condition } from '../story/conditions';
+import { SAE_HOUSE_OPEN } from './house';
+
+/** 第1幕のあとの章でも、サエに結帳を見せてもらえるよう頼める（家に入れなくて詰まらないように。Phase 5.5）。 */
+const ASK_LEDGER_LATER: DialogueChoice = { text: '結帳を見せてもらえますか？', when: not(SAE_HOUSE_OPEN), next: 'ledgerOkLater' };
 import {
   all,
   consentIs,
@@ -69,6 +73,7 @@ const MINE_TOPICS: readonly DialogueChoice[] = [
 const SAE3_TOPICS: readonly DialogueChoice[] = [
   { text: '作業台でまとめた案を相談する', when: planPending('sae'), next: 'planConsult3' },
   { text: '体、どうかしたんですか？', when: notYet('sae.later', 'injured'), next: 'injury' },
+  ASK_LEDGER_LATER,
 ];
 
 /** 第3幕で伊助に聞けること。 */
@@ -93,7 +98,7 @@ const SAE_TOPICS: readonly DialogueChoice[] = [
   },
   {
     text: '結帳を見てもいいですか？',
-    when: all(notYet('ledger.basics', 'read'), not(flag('asked:saeLedger'))),
+    when: not(SAE_HOUSE_OPEN),
     next: 'ledgerOk',
   },
 ];
@@ -216,7 +221,7 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
       ledgerHint: {
         speaker: 'toki',
         lines: [
-          'サエさんの家の縁先に、結帳が置いてあるはずだよ。',
+          'サエさんの家の中に、結帳がしまってあるはずだよ。**サエさんに頼めば見せてくれる**と思う。',
           '昔、誰がどの家を手伝ったか書いてあるんだって。みんなの話と合わせて見ると、何か分かるかもね。',
         ],
       },
@@ -303,6 +308,7 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
         lines: ['（日が傾いてきた。）'],
         choices: [
           { text: '一日を終える', effects: [setFlag('roofDay:ended')] },
+          ASK_LEDGER_LATER,
           { text: 'もう少し見て回る' },
         ],
       },
@@ -355,14 +361,17 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
       endE1: {
         speaker: 'sae',
         lines: ['下の仕事でも、返せてよかった。', '伊助さんが「**これで十分だ**」って言ってくれたの。'],
+        choices: [ASK_LEDGER_LATER, { text: '失礼します' }],
       },
       endE2: {
         speaker: 'sae',
         lines: ['返せなかったわね……。この足じゃ、どうにもならなかった。', 'でも、**まだ話し合える**わ。'],
+        choices: [ASK_LEDGER_LATER, { text: '失礼します' }],
       },
       endE3: {
         speaker: 'sae',
         lines: ['伊助さんが、今年は見送るって。', '……私の足のことも、考えてくれたのかしらね。'],
+        choices: [ASK_LEDGER_LATER, { text: '失礼します' }],
       },
       first: {
         speaker: 'sae',
@@ -413,9 +422,17 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
       },
       ledgerOk: {
         speaker: 'sae',
-        lines: ['ええ、縁先の文箱に入ってるわ。うちの屋根葺きで誰に何をしてもらったか、書いてあるはずよ。'],
+        lines: [
+          'ええ、どうぞ上がって。**囲炉裏の奥の棚の文箱**に入ってるわ。',
+          'うちの屋根葺きで誰に何をしてもらったか、書いてあるはずよ。入口の戸は開けてあるから。',
+        ],
         effects: [setFlag('asked:saeLedger')],
         next: 'more',
+      },
+      ledgerOkLater: {
+        speaker: 'sae',
+        lines: ['ええ、どうぞ上がって。結帳は**囲炉裏の奥の棚の文箱**よ。'],
+        effects: [setFlag('asked:saeLedger')],
       },
       again: {
         speaker: 'sae',
@@ -1070,12 +1087,42 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
     nodes: {
       first: {
         lines: [
-          '縁先の文箱に、表に「結帳」と書かれた古い帳面がしまってある。',
+          '囲炉裏の奥の棚の文箱に、表に「結帳」と書かれた古い帳面がしまってある。',
           'サエ家の屋根葺きで、誰が何をしたかの記録らしい。開いてみよう。',
         ],
         effects: [learn('ledger.basics', 'read'), learn('isuke.pastHelp', 'onRecord')],
       },
       again: { lines: ['サエ家の結帳を開く。'] },
+    },
+  },
+  // ── サエ家の入口と室内（Phase 5.5）──
+  saeDoor: {
+    id: 'saeDoor',
+    entries: [{ when: SAE_HOUSE_OPEN, node: 'enter' }, { node: 'closed' }],
+    nodes: {
+      enter: { lines: ['戸を開けて、サエ家に上がる。'] },
+      closed: {
+        lines: ['サエ家の入口。戸は閉まっている。', '（人の家だ。**サエさんに断ってから**入ろう。）'],
+      },
+    },
+  },
+  saeDoorInside: {
+    id: 'saeDoorInside',
+    entries: [{ node: 'leave' }],
+    nodes: {
+      leave: { lines: ['戸を開けて、外に出る。'] },
+    },
+  },
+  irori: {
+    id: 'irori',
+    entries: [{ node: 'look' }],
+    nodes: {
+      look: {
+        lines: [
+          '囲炉裏に、小さく火が残っている。上には、煤で黒くなった板が吊るしてある。',
+          '火の粉が天井へ上がらないようにするものらしい。煙は格子の天井のすき間から、上の暗がりへ抜けていく。',
+        ],
+      },
     },
   },
   mineRecords: {

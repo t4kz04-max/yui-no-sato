@@ -1,10 +1,13 @@
 import * as THREE from 'three';
 import { damp } from '../core/math';
 import {
+  DEFAULT_ORBIT_LIMITS,
+  DEFAULT_ORBIT_SETTINGS,
   applyOrbitInput,
   createOrbitState,
   orbitOffset,
   type OrbitInput,
+  type OrbitLimits,
   type OrbitState,
 } from './orbit';
 
@@ -31,6 +34,8 @@ export class ThirdPersonCamera {
   /** 遮蔽物からカメラを離す余白。 */
   collisionPadding = 0.35;
   minCollisionDistance = 0.9;
+  /** 上下角・距離の範囲（屋内では近め・低めにする。Phase 5.5）。 */
+  limits: OrbitLimits = DEFAULT_ORBIT_LIMITS;
 
   constructor(
     readonly camera: THREE.PerspectiveCamera,
@@ -42,7 +47,7 @@ export class ThirdPersonCamera {
   }
 
   update(focus: { x: number; y: number; z: number }, input: OrbitInput, dt: number): void {
-    applyOrbitInput(this.orbit, input, dt);
+    applyOrbitInput(this.orbit, input, dt, DEFAULT_ORBIT_SETTINGS, this.limits);
 
     const goal = new THREE.Vector3(focus.x, focus.y + this.lookHeight, focus.z);
     if (!this.initialized) {
@@ -82,6 +87,11 @@ export class ThirdPersonCamera {
     this.orbit.yaw = this.orbit.targetYaw = yaw;
     this.initialized = false;
     this.effectiveDistance = this.orbit.distance;
+  }
+
+  /** 遮蔽物を避けた、実際の注視点からの距離。 */
+  get currentDistance(): number {
+    return this.effectiveDistance;
   }
 
   /** 画面奥方向の水平角。移動入力の基準に使う。 */

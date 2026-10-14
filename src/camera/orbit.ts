@@ -31,6 +31,14 @@ export interface OrbitState {
   targetDistance: number;
 }
 
+/** 屋内（サエ家の室内）：天井の下に収まる距離と角度。 */
+export const INDOOR_ORBIT_LIMITS: OrbitLimits = {
+  minPitch: 0.12,
+  maxPitch: 0.9,
+  minDistance: 2.2,
+  maxDistance: 4.6,
+};
+
 export function createOrbitState(yaw: number, pitch = 0.42, distance = 10): OrbitState {
   return { yaw, pitch, distance, targetYaw: yaw, targetPitch: pitch, targetDistance: distance };
 }

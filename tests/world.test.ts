@@ -99,6 +99,8 @@ describe('地形', () => {
     for (let x = WALK_BOUNDS.minX; x < WALK_BOUNDS.maxX; x += 1) {
       for (let z = WALK_BOUNDS.minZ; z < WALK_BOUNDS.maxZ; z += 1) {
         if (Math.abs(z - WATERWAY.centerZ) < WATERWAY.halfWidth + 1) continue;
+        // サエ家の室内は平らな床（外からは壁で入れない。境目の段差は対象外）
+        if (Math.abs(x) < 9.5 && Math.abs(z) < 7) continue;
         const dx = groundHeight(x + 0.5, z) - groundHeight(x - 0.5, z);
         const dz = groundHeight(x, z + 0.5) - groundHeight(x, z - 0.5);
         maxSlope = Math.max(maxSlope, Math.hypot(dx, dz));

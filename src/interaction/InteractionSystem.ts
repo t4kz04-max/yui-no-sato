@@ -25,6 +25,8 @@ export class InteractionSystem {
   /** 結果の後など、配置データと違う場所にいる対象（ID → 位置と向き）。 */
   private readonly overrides = new Map<string, { position: { x: number; z: number }; heading: number }>();
   private effective: readonly Interactable[];
+  /** 屋内（サエ家の室内）にいるか。屋内・屋外で操作できる対象を分ける。 */
+  private indoorMode = false;
 
   constructor(
     private readonly baseDefs: readonly Interactable[],
@@ -80,9 +82,21 @@ export class InteractionSystem {
     return this.story.has(completionFlag(def));
   }
 
+  /** 屋内にいるか（室内の調べられる物だけを対象にする）。 */
+  setIndoor(indoor: boolean): void {
+    if (indoor === this.indoorMode) return;
+    this.indoorMode = indoor;
+    this.targetDef = null;
+  }
+
+  get indoor(): boolean {
+    return this.indoorMode;
+  }
+
   updateTarget(pose: Pose): void {
     if (this.active) return;
-    this.targetDef = findTarget(pose, this.interactables, this.targetDef?.id ?? null);
+    const here = this.interactables.filter((d) => (d.indoor ?? false) === this.indoorMode);
+    this.targetDef = findTarget(pose, here, this.targetDef?.id ?? null);
   }
 
   /** 対象があれば会話・調査を始める。 */

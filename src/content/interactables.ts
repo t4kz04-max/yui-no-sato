@@ -114,11 +114,50 @@ export const INTERACTABLES: readonly Interactable[] = [
     label: '結帳',
     dialogue: 'ledger',
     location: 'saeHouse',
-    // サエ家の縁先の文箱（world/layout.ts の ledgerBox）
-    position: { x: 5.8, z: 7.95 },
-    range: 2.4,
-    markerHeight: 1.4,
+    // Phase 5.5：サエ家の室内、北の壁際の棚の文箱（world/saeInterior.ts の ledgerShelf）
+    position: { x: 1.4, z: -4.55 },
+    range: 2.0,
+    markerHeight: 1.2,
     opens: 'ledger',
+    indoor: true,
+  },
+  {
+    kind: 'object',
+    id: 'irori',
+    label: '囲炉裏',
+    dialogue: 'irori',
+    location: 'saeHouse',
+    // サエ家の室内、板の間の中央（world/saeInterior.ts の irori の南の縁）
+    position: { x: -0.3, z: -0.4 },
+    range: 1.8,
+    markerHeight: 1.0,
+    indoor: true,
+  },
+  // ── サエ家の入口（Phase 5.5）。外から E で入り、中から E で出る ──
+  {
+    kind: 'object',
+    id: 'saeDoor',
+    label: 'サエ家の入口',
+    action: '入る',
+    dialogue: 'saeDoor',
+    location: 'saeHouse',
+    position: { x: 0, z: 7.1 },
+    range: 1.8,
+    markerHeight: 2.4,
+    opens: 'enterHouse',
+  },
+  {
+    kind: 'object',
+    id: 'saeDoorInside',
+    label: '入口',
+    action: '外に出る',
+    dialogue: 'saeDoorInside',
+    location: 'saeHouse',
+    position: { x: 0, z: 5.2 },
+    range: 1.8,
+    markerHeight: 2.2,
+    opens: 'leaveHouse',
+    indoor: true,
   },
   {
     kind: 'object',
@@ -137,6 +176,9 @@ export const NPCS: readonly NpcInteractable[] = INTERACTABLES.filter((i): i is N
 
 /** 住民は通り抜けられない（当たり判定の半径）。 */
 export const NPC_COLLIDER_RADIUS = 0.4;
+
+/** 外にある対象（屋外の配置の確認に使う）。 */
+export const OUTDOOR_INTERACTABLES: readonly Interactable[] = INTERACTABLES.filter((i) => !i.indoor);
 
 export function npcColliders(npcs: readonly NpcInteractable[] = NPCS): Collider[] {
   return npcs.map((n) => ({ kind: 'circle', x: n.position.x, z: n.position.z, radius: NPC_COLLIDER_RADIUS }));

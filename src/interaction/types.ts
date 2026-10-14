@@ -17,6 +17,8 @@ interface InteractableBase {
   /** content/dialogues の会話 ID。 */
   readonly dialogue: string;
   readonly location: LocationId;
+  /** 家の中（サエ家の室内）にあるもの。屋内にいるときだけ操作できる（Phase 5.5）。 */
+  readonly indoor?: boolean;
 }
 
 export interface NpcInteractable extends InteractableBase {
@@ -30,7 +32,9 @@ export interface NpcInteractable extends InteractableBase {
 export interface ObjectInteractable extends InteractableBase {
   readonly kind: 'object';
   /** 調べ終えたときに開く専用画面（結帳など）。 */
-  readonly opens?: 'ledger' | 'plan';
+  readonly opens?: 'ledger' | 'plan' | 'enterHouse' | 'leaveHouse';
+  /** 案内表示の動詞（既定は「調べる」。入口は「入る」「出る」）。 */
+  readonly action?: string;
   /** 案内表示を出す高さ（地面から）。 */
   readonly markerHeight: number;
 }
@@ -41,6 +45,11 @@ export const ACTION_LABEL: Record<Interactable['kind'], string> = {
   npc: '話す',
   object: '調べる',
 };
+
+/** 案内表示に出す動詞。 */
+export function actionLabel(def: Interactable): string {
+  return (def.kind === 'object' ? def.action : undefined) ?? ACTION_LABEL[def.kind];
+}
 
 /** 会話・調査を一度終えたときに自動で立つフラグ。 */
 export function completionFlag(def: Interactable): FlagId {

@@ -3,7 +3,8 @@ import { penetration } from '../src/core/collision';
 import { createRandom } from '../src/core/random';
 import { CHARACTERS } from '../src/content/characters';
 import { DIALOGUES } from '../src/content/dialogues';
-import { INTERACTABLES, NPCS, NPC_COLLIDER_RADIUS, npcColliders } from '../src/content/interactables';
+import { INTERACTABLES, NPCS, NPC_COLLIDER_RADIUS, OUTDOOR_INTERACTABLES, npcColliders } from '../src/content/interactables';
+import { SAE_HOUSE_OPEN } from '../src/content/house';
 import { LEDGER } from '../src/content/ledger';
 import { OBJECTIVES, currentObjective } from '../src/content/objectives';
 import { HOUSEHOLDS, STORY_DEFS } from '../src/content/story';
@@ -183,7 +184,8 @@ describe('住民と調査対象の配置', () => {
 
   const map = buildReachability([...world, ...npcColliders()], WALK_BOUNDS, PLAYER_START.position, radius);
 
-  it.each(INTERACTABLES.map((i) => [i.label, i] as const))(
+  // 室内（サエ家）の対象は tests/phase5_5.test.ts で、室内の当たり判定を使って確かめる
+  it.each(OUTDOOR_INTERACTABLES.map((i) => [i.label, i] as const))(
     'スタート地点から歩いて「%s」に話しかけられる・調べられる位置まで行ける',
     (_, def) => {
       // 格子の間隔（0.5m）の分だけ余裕を見る
@@ -212,6 +214,8 @@ describe('目的表示', () => {
 /** 対象の正面に立って話しかけ、選択肢を pick で選びながら最後まで進める。 */
 function talk(sys: InteractionSystem, id: string, pick: (choices: readonly string[]) => number = () => 0): string[] {
   const def = INTERACTABLES.find((i) => i.id === id)!;
+  // 室内の対象は、家の中にいるときだけ操作できる（Phase 5.5）
+  sys.setIndoor(def.indoor ?? false);
   sys.updateTarget({ x: def.position.x, z: def.position.z - 1, heading: 0 });
   expect(sys.target?.id).toBe(id);
   sys.interact();
@@ -289,7 +293,14 @@ describe('仮シナリオの通し確認', () => {
     talk(sys, 'isuke', (c) => ((choices = [...c]), last(c)));
     expect(choices.some((c) => c.includes('十二年前'))).toBe(false);
 
-    // 結帳は最初から読める（設計書 G：探索順は固定しない）
+    // 結帳はサエに頼めば最初から読める（設計書 G：探索順は固定しない。Phase 5.5 で室内へ移した）
+    let asked = false;
+    talk(sys, 'sae', (c) => {
+      const i = c.findIndex((x) => x.includes('結帳を見てもいいですか'));
+      if (!asked && i >= 0) return (asked = true), i;
+      return c.length - 1;
+    });
+    expect(asked).toBe(true);
     talk(sys, 'ledger');
     expect(story.currentStage('ledger.basics')).toBe('read');
     expect(story.currentStage('isuke.pastHelp')).toBe('onRecord');
@@ -443,6 +454,9 @@ describe('取得順序・中断に対する一貫性（無作為な遊び方 400
           continue;
         }
         const def = INTERACTABLES[Math.floor(rand() * INTERACTABLES.length)]!;
+        // サエ家の室内には、サエの許しがあるときだけ入れる
+        if (def.indoor && !evaluate(SAE_HOUSE_OPEN, story)) continue;
+        sys.setIndoor(def.indoor ?? false);
         sys.updateTarget({ x: def.position.x, z: def.position.z - 1, heading: 0 });
         if (!sys.interact()) continue;
         const cancelAt = rand() < 0.25 ? Math.floor(rand() * 4) : Infinity;

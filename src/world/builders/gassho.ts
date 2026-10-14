@@ -30,6 +30,8 @@ export interface GasshoStyle {
   /** 傷みのひどい所（南面）。 */
   readonly damage: ThatchRoofSpec['damage'];
   readonly seed: number;
+  /** 中に入れる家（壁を中空にする。外から見た形は同じ）。Phase 5.5：サエ家だけ。 */
+  readonly hollow?: boolean;
 }
 
 export const DEFAULT_GASSHO_STYLE: GasshoStyle = {
@@ -56,6 +58,8 @@ const ROOF_HALF_DEPTH = 8.3;
 const BODY_HALF_W = 5;
 const BODY_HALF_D = 7;
 const SILL_Y = 0.6;
+/** 中に入れる家の外壁の厚み（縮尺 1 のとき）。 */
+const WALL_THICKNESS = 0.25;
 /** 壁の上端（屋根の裏に隠れる高さ）。 */
 const WALL_TOP_Y = 5.2;
 
@@ -95,12 +99,30 @@ export function createGasshoHouse(p: Palette, style: GasshoStyle = DEFAULT_GASSH
 
   // ── 2. 木の躯体（板壁）──
   const wallH = WALL_TOP_Y - SILL_Y;
-  const body = shadowed(
-    new THREE.Mesh(boxWithWorldUv(BODY_HALF_W * 2, wallH, BODY_HALF_D * 2, 1.6), p.woodWall),
-  );
-  body.position.y = SILL_Y + wallH / 2;
-  markCameraBlocker(body);
-  house.add(body);
+  if (style.hollow) {
+    // 中に入れる家：外壁を 4 枚の厚い板にする（内側の面が室内の壁になる。室内は interior.ts）
+    const t = WALL_THICKNESS;
+    const slabs: Array<[number, number, number, number]> = [
+      [BODY_HALF_W * 2, t, 0, BODY_HALF_D - t / 2],
+      [BODY_HALF_W * 2, t, 0, -BODY_HALF_D + t / 2],
+      [t, BODY_HALF_D * 2 - t * 2, BODY_HALF_W - t / 2, 0],
+      [t, BODY_HALF_D * 2 - t * 2, -BODY_HALF_W + t / 2, 0],
+    ];
+    for (const [w, d, x, z] of slabs) {
+      const slab = shadowed(new THREE.Mesh(boxWithWorldUv(w, wallH, d, 1.6), p.woodWall));
+      slab.position.set(x, SILL_Y + wallH / 2, z);
+      slab.name = 'house-wall';
+      markCameraBlocker(slab);
+      house.add(slab);
+    }
+  } else {
+    const body = shadowed(
+      new THREE.Mesh(boxWithWorldUv(BODY_HALF_W * 2, wallH, BODY_HALF_D * 2, 1.6), p.woodWall),
+    );
+    body.position.y = SILL_Y + wallH / 2;
+    markCameraBlocker(body);
+    house.add(body);
+  }
 
   const pillarH = EAVE_LOW + 0.2 - SILL_Y;
   const pillarGeo = new THREE.BoxGeometry(0.26, pillarH, 0.26);
@@ -129,7 +151,16 @@ export function createGasshoHouse(p: Palette, style: GasshoStyle = DEFAULT_GASSH
     [2.95, 0.2],
     [EAVE_LOW - 0.1, 0.3],
   ] as const) {
-    add(box(BODY_HALF_W * 2 + 0.24, h, BODY_HALF_D * 2 + 0.24, p.woodDark, false), 0, y, 0);
+    if (style.hollow) {
+      // 中に入れる家：外壁に沿った 4 本の横木にする（家の中を板でふさがない）
+      const t = 0.24;
+      add(box(BODY_HALF_W * 2 + t, h, t, p.woodDark, false), 0, y, BODY_HALF_D + 0.0);
+      add(box(BODY_HALF_W * 2 + t, h, t, p.woodDark, false), 0, y, -BODY_HALF_D);
+      add(box(t, h, BODY_HALF_D * 2 + t, p.woodDark, false), BODY_HALF_W, y, 0);
+      add(box(t, h, BODY_HALF_D * 2 + t, p.woodDark, false), -BODY_HALF_W, y, 0);
+    } else {
+      add(box(BODY_HALF_W * 2 + 0.24, h, BODY_HALF_D * 2 + 0.24, p.woodDark, false), 0, y, 0);
+    }
   }
 
   // 長い辺の窓：柱の間ごとに、障子か板戸（雨戸）

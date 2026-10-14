@@ -63,11 +63,14 @@ if (process.env.SHOTS_EVAL) {
   process.exit(0);
 }
 
+// 調査用：SHOTS_PRE の式を、撮影の前にページ内で評価する
+const pre = process.env.SHOTS_PRE;
+
 /** 視点を置き、数フレーム待って撮影し、描画の統計を取る。 */
 async function shot(name, v) {
   await page.evaluate((v) => {
     const g = window.__yui;
-    g.placePlayerAt({ x: v.x, z: v.z, heading: v.heading ?? 0 });
+    (v.keepIndoor ? g.placePlayerInPlace : g.placePlayerAt).call(g, { x: v.x, z: v.z, heading: v.heading ?? 0 });
     const o = g.cameraRig.orbit;
     o.yaw = o.targetYaw = v.yaw ?? v.heading ?? 0;
     o.pitch = o.targetPitch = v.pitch ?? 0.42;
@@ -83,6 +86,7 @@ async function shot(name, v) {
     }
     document.getElementById('hud').style.visibility = v.hideHud ? 'hidden' : '';
   }, v);
+  if (pre) await page.evaluate((src) => (0, eval)(src), pre);
   await wait(v.settle ?? 900);
   const stats = await page.evaluate(async () => {
     const g = window.__yui;
@@ -177,6 +181,26 @@ if (want('roof')) {
   await shot('roof-02-sae-west', { x: 0, z: 30, heading: Math.PI, hideHud: true, cam: { pos: [-26, 8, 20], look: [-2, 7, 0] } });
   await shot('roof-03-isuke', { x: 0, z: 30, heading: Math.PI, hideHud: true, cam: { pos: [6, 7, 16], look: [24, 6, -6] } });
   await shot('roof-04-village', { x: 0, z: 30, heading: Math.PI, hideHud: true, cam: { pos: [10, 26, 46], look: [0, 2, -6] } });
+}
+
+if (want('interior')) {
+  // サエ家の室内（Phase 5.5）：許しを得て入口から入る
+  await page.evaluate(() => {
+    const g = window.__yui;
+    g.story.set('asked:saeLedger');
+    g.placePlayerAt({ x: 0, z: 7.5, heading: Math.PI });
+    g.enterSaeHouse();
+  });
+  await wait(800);
+  await shot('interior-01-entry', { x: 0, z: 4.5, heading: Math.PI, yaw: Math.PI, pitch: 0.42, dist: 3.8, keepIndoor: true });
+  await shot('interior-02-irori', { x: 1.6, z: 0.6, heading: Math.PI * 1.25, yaw: Math.PI * 1.25, pitch: 0.4, dist: 3.8, keepIndoor: true });
+  await shot('interior-03-ledger', { x: 1.4, z: -3.6, heading: Math.PI, yaw: Math.PI, pitch: 0.35, dist: 3.5, keepIndoor: true });
+  await shot('interior-04-west', { x: -2.5, z: 0.5, heading: -Math.PI / 2, yaw: -Math.PI / 2, pitch: 0.35, dist: 3.8, keepIndoor: true });
+  await shot('interior-05-doma', { x: -1, z: -2.5, heading: 0, yaw: 0, pitch: 0.35, dist: 3.8, keepIndoor: true });
+  await shot('interior-06-overview', { x: 0, z: 4.5, heading: Math.PI, hideHud: true, keepIndoor: true, cam: { pos: [2.6, 3.0, 5.2], look: [-2.5, 0.8, -3] } });
+  await page.evaluate(() => window.__yui.leaveSaeHouse());
+  await wait(500);
+  await shot('interior-07-exited', { x: 0, z: 7.55, heading: 0, yaw: Math.PI, pitch: 0.42, dist: 10, keepIndoor: true });
 }
 
 if (want('people')) {

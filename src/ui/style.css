@@ -1410,3 +1410,13 @@ summary {
     display: none;
   }
 }
+
+/* Phase 5.5：サエ家の出入りの短い暗転（操作は止めない） */
+.scene-fade {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 50;
+}

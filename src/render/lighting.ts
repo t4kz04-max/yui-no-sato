@@ -6,6 +6,8 @@ const SKY_ZENITH = 0x86a9c8;
 
 export interface Lighting {
   readonly sun: THREE.DirectionalLight;
+  /** 空の光（屋内では強める。Phase 5.5）。 */
+  readonly sky: THREE.HemisphereLight;
   /** 太陽の方向（光が来る向き、正規化済み）。 */
   readonly sunDirection: THREE.Vector3;
   readonly horizon: THREE.Color;
@@ -23,7 +25,8 @@ export function setupLighting(scene: THREE.Scene): Lighting {
   scene.fog = new THREE.Fog(SKY_HORIZON, 85, 300);
   scene.add(createSkyDome(horizon, new THREE.Color(SKY_ZENITH)));
 
-  scene.add(new THREE.HemisphereLight(0xd8e6ff, 0x6b5638, 1.15));
+  const sky = new THREE.HemisphereLight(0xd8e6ff, 0x6b5638, 1.15);
+  scene.add(sky);
   scene.add(new THREE.AmbientLight(0xfff0d8, 0.25));
 
   const sun = new THREE.DirectionalLight(0xffdcae, 2.6);
@@ -43,7 +46,7 @@ export function setupLighting(scene: THREE.Scene): Lighting {
   scene.add(sun);
   scene.add(sun.target);
   const sunDirection = sun.position.clone().sub(sun.target.position).normalize();
-  return { sun, sunDirection, horizon };
+  return { sun, sky, sunDirection, horizon };
 }
 
 /** 空の半球（地平線→天頂のグラデーション）。カメラに追従させなくても、十分大きいので端は見えない。 */

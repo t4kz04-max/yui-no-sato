@@ -31,6 +31,8 @@ export interface GasshoVariant {
   readonly leanKaya?: boolean;
   /** 南面の傷みのひどい所（棟方向の割合 zFrom〜zTo、軒先からの割合 uTo）。 */
   readonly damage?: { readonly zFrom: number; readonly zTo: number; readonly uTo: number };
+  /** 中に入れる家（Phase 5.5：サエ家だけ。室内は world/saeInterior.ts）。 */
+  readonly hollow?: boolean;
 }
 
 export interface BuildingDef {
@@ -151,7 +153,7 @@ export const BUILDINGS: readonly BuildingDef[] = [
     rotation: Math.PI / 2,
     scale: 1.2,
     location: 'saeHouse',
-    variant: { windowRows: 4, entrance: 'side', engawa: true, damage: { zFrom: 0.14, zTo: 0.46, uTo: 0.62 } },
+    variant: { windowRows: 4, entrance: 'side', engawa: true, damage: { zFrom: 0.14, zTo: 0.46, uTo: 0.62 }, hollow: true },
   },
   // 東：伊助家（正面を村の中心＝西へ向ける）
   {
@@ -236,8 +238,7 @@ export const PROPS: readonly PropDef[] = [
   { kind: 'kayaBundles', position: { x: -29.5, z: 14.5 }, rotation: 0 },
   // 宗平の作業場：作業台（Phase 1 以降の計画台の仮置き）
   { kind: 'workbench', position: { x: 4.5, z: -21 }, rotation: 0 },
-  // サエ家の縁先の文箱（結帳）
-  { kind: 'ledgerBox', position: { x: 5.8, z: 7.25 }, rotation: 0 },
+  // サエ家の結帳の文箱は、Phase 5.5 で室内（world/saeInterior.ts）へ移した
   // ミネ家の茅置場の脇の棚（貸し借りの控え）
   { kind: 'recordShelf', position: { x: -22.15, z: 8.5 }, rotation: Math.PI / 2 },
   // 水路沿いの石

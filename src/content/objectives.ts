@@ -1,4 +1,5 @@
 import { all, evaluate, flag, inChapter, knows, not, notYet, planPhase, type Condition, type StoryQuery } from '../story/conditions';
+import { SAE_HOUSE_OPEN } from './house';
 
 /**
  * 右上に出す短い目的（設計書 M 節）。上から順に条件を調べ、最初に成立したものを表示する。
@@ -28,7 +29,9 @@ export const OBJECTIVES: readonly ObjectiveDef[] = [
   { when: planPhase('ready'), text: '全員が承知した。作業台で計画を決める（決めると変えられない）' },
   { when: not(flag('talked:isuke')), text: '伊助に屋根葺きの手伝いを相談する' },
   { when: notYet('isuke.availability', 'harvest'), text: '伊助が断った理由を探る' },
-  { when: notYet('ledger.basics', 'read'), text: 'サエ家の結帳を確かめる' },
+  // Phase 5.5：結帳はサエ家の室内。まずサエに頼んで上がらせてもらう
+  { when: all(notYet('ledger.basics', 'read'), not(SAE_HOUSE_OPEN)), text: 'サエに、結帳を見せてもらえるか頼む' },
+  { when: notYet('ledger.basics', 'read'), text: 'サエ家に上がって、結帳を確かめる' },
   { when: not(all(flag('talked:sohei'), flag('talked:mine'))), text: '宗平とミネにも話を聞く（段取りと茅のこと）' },
   { text: '宗平の作業台で、屋根葺きの段取りを考える' },
 ];

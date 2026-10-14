@@ -3,6 +3,7 @@
  * - Phase 0：起動・移動・衝突・カメラ・ズーム・リサイズ・コンソールエラー
  * - Phase 1（[P1]）：案内表示、会話の開始・送り・選択・終了、会話中の操作制御、調査、状態による選択肢の変化
  * - Phase 2（[P2]）：手帳、結帳、ポーズ、会話の中断、記録（保存・続きから・壊れた記録・やり直し）
+ * - Phase 5.5（[P5.5]）：サエ家の出入り（許しの前後）、室内の移動とカメラ、結帳、室内での記録・読込、橋の欄干（実際に歩かせる）、橋の通行
  * - Phase 5（[P5]）：住民の待機の型、5 地点、すべての住民・調べられる物の操作、屋根葺きの日（計画ごとの人・役割・茅の山・足場、運ぶ人の動きと立ち止まり）、第3幕の見た目（杖・屋根）、記録の復元、描画呼び出し数
  * - Phase 4（[P4]）：宗平・ミネを含む作業台（項目の出し分け）、相談と見直し、屋根葺き当日、三年後、第3幕（Q1〜Q3）、エンディング、史実と創作の解説、記録の復元、各画面の大きさ（1280x720・1024x640）
  *
@@ -236,6 +237,26 @@ const finishDialogue = async (pick = () => 'Digit1') => {
   return ui();
 };
 
+/** Phase 5.5：サエ家の入口の前に立って E（許しがあれば室内へ）。屋内になったかを返す。 */
+const indoorState = () => page.evaluate(() => ({ indoor: window.__yui.world.indoor, x: window.__yui.player.x, z: window.__yui.player.z }));
+const enterSaeHouse = async () => {
+  await place(0, 7.4, Math.PI);
+  await waitFor((u) => u.target === 'saeDoor');
+  await press('KeyE', (u) => u.dialogueVisible);
+  await finishDialogue();
+  await wait(300);
+  return indoorState();
+};
+/** 室内の入口の前に立って E（外へ）。 */
+const leaveSaeHouse = async () => {
+  await place(0, 4.4, 0);
+  await waitFor((u) => u.target === 'saeDoorInside');
+  await press('KeyE', (u) => u.dialogueVisible);
+  await finishDialogue();
+  await wait(300);
+  return indoorState();
+};
+
 const u0 = await ui();
 check('[P1] 右上に目的が表示される', u0.objective === '広場にいるトキに話しかける', u0.objective);
 
@@ -418,8 +439,32 @@ check('[P2] 会話中の Esc で会話を中断し、探索に戻る（ポーズ
 check('[P2] 中断しても会ったことと得た情報は残り、「最後まで話した」にはならない',
   c1.met.includes('sae') && c1.learned.includes('sae.schedule/needsHelp') && !c1.flags.includes('talked:sae'), c1.learned.join(','));
 
-// 結帳
-await place(5.8, 9.6, Math.PI);
+// 結帳（Phase 5.5：サエ家の室内。サエに頼んでから入る）
+const h0 = await enterSaeHouse();
+const h0text = await page.evaluate(() => window.__yui.story.flagList());
+check('[P5.5] サエに頼む前は、入口で断られて家に入れない', !h0.indoor && !h0text.includes('asked:saeLedger'), JSON.stringify(h0));
+await place(3.4, 12.4, Math.PI);
+await waitFor((u) => u.target === 'sae');
+await press('KeyE', (u) => u.dialogueVisible);
+await finishDialogue((u) => {
+  const i = u.choices.findIndex((c) => c.text.includes('結帳を見てもいいですか'));
+  return i >= 0 ? `Digit${i + 1}` : `Digit${u.choices.length}`;
+});
+const h1 = await enterSaeHouse();
+check('[P5.5] サエに頼むと、入口から家に入れる（室内に移る）', h1.indoor && Math.abs(h1.z - 3.4) < 0.3, JSON.stringify(h1));
+// 室内を歩く：北へ 2 秒歩いても壁の中に入らず、室内に留まる
+await page.keyboard.down('KeyW');
+await wait(2000);
+await page.keyboard.up('KeyW');
+await wait(300);
+const h2 = await page.evaluate(() => {
+  const g = window.__yui; const c = g.camera.position;
+  return { indoor: g.world.indoor, x: g.player.x, z: g.player.z, cam: [c.x, c.y, c.z], floor: g.player.y };
+});
+check('[P5.5] 室内を自由に歩ける（入った位置から動き、室内に留まる）', h2.indoor && h2.z < 3.0 && Math.abs(h2.x) < 8.1 && h2.z > -5.7, JSON.stringify(h2));
+check('[P5.5] 室内ではカメラが壁と天井の内側に収まる', Math.abs(h2.cam[0]) < 8.1 && h2.cam[2] < 5.7 && h2.cam[2] > -5.7 && h2.cam[1] < h2.floor + 3.4, JSON.stringify(h2.cam));
+await page.screenshot({ path: `${OUT}/shot-24-interior.png` });
+await place(1.4, -3.9, Math.PI);
 await waitFor((u) => u.target === 'ledger');
 await press('KeyE', (u) => u.dialogueVisible);
 const l0 = await finishDialogue();
@@ -430,6 +475,8 @@ check('[P2] 結帳では現在の意向を過去の記録と別の欄に示す',
 check('[P2] 結帳が創作の記録であることを画面に明記している', /ゲームのために創作した記録/.test(l1.ledgerNote));
 await page.screenshot({ path: `${OUT}/shot-22-ledger.png` });
 const l2 = await press2('Escape', (s) => !s.ledger);
+const h3 = await leaveSaeHouse();
+check('[P5.5] 室内の入口から外に戻れる（入口の前の外に出る）', !h3.indoor && h3.z > 7 && Math.abs(h3.x) < 0.5, JSON.stringify(h3));
 check('[P2] Esc で結帳を閉じて探索に戻る', l2.mode === 'explore');
 
 // 結帳を読んだ後は、伊助に過去の協力について聞ける
@@ -729,7 +776,10 @@ for (const [w, h] of [[1280, 720], [1024, 640]]) {
   const q4nb = await layout('.notebook', '.notebook-item-summary', '.notebook-body');
   check(`[P4] ${q4tag} 手帳：画面に収まり、要点は18px以上`, fits(q4nb, 18), JSON.stringify(q4nb));
   await press2('Tab', (s) => !s.notebook);
-  await place(5.8, 9.6, Math.PI);
+  // 結末の後も、家に上がって結帳を見返せる（Phase 5.5）
+  const q4in = await enterSaeHouse();
+  check(`[P4] ${q4tag} 結末の後も、サエ家に上がれる`, q4in.indoor, JSON.stringify(q4in));
+  await place(1.4, -3.9, Math.PI);
   await waitFor((u) => u.target === 'ledger');
   await press('KeyE', (u) => u.dialogueVisible);
   await finishDialogue();
@@ -738,6 +788,8 @@ for (const [w, h] of [[1280, 720], [1024, 640]]) {
   check(`[P4] ${q4tag} 結帳：画面に収まり、今年と三年後の記録が書き加わっている`, fits(q4ll, 16) && /今年の秋/.test(q4lg3.ledgerText) && /三年後の秋/.test(q4lg3.ledgerText), JSON.stringify(q4ll));
   if (w === 1280) await page.screenshot({ path: `${OUT}/shot-56-ledger-end.png` });
   await press2('Escape', (s) => !s.ledger);
+  const q4out = await leaveSaeHouse();
+  check(`[P4] ${q4tag} 結帳を見た後、外に出られる`, !q4out.indoor, JSON.stringify(q4out));
   await openPlan();
   const q4pl = await layout('.plan', '.plan-option', '.plan-body');
   check(`[P4] ${q4tag} 作業台：画面に収まり、選択肢は16px以上`, fits(q4pl, 16), JSON.stringify(q4pl));
@@ -840,7 +892,8 @@ for (const [id, [x, z]] of Object.entries(AREAS)) {
 check('[P5] 5 地点すべてで地点の判定が働く', reachedAreas.length === 5, reachedAreas.join(','));
 
 // 調べられる物・住民のすべてに、正面から近づいて操作できる（モデルの大きさを変えても判定がずれていない）
-const targets = await page.evaluate(() => window.__yui.interaction.interactables.map((i) => ({ id: i.id, x: i.position.x, z: i.position.z, range: i.range })));
+// 屋外の対象（室内の結帳・囲炉裏・入口は [P2]・[P5.5] で、家に入ってから確かめる）
+const targets = await page.evaluate(() => window.__yui.interaction.interactables.filter((i) => !i.indoor).map((i) => ({ id: i.id, x: i.position.x, z: i.position.z, range: i.range })));
 const operated = [];
 const notOperated = [];
 for (const t of targets) {
@@ -987,6 +1040,62 @@ await page.click('.notice-layer .menu-item[data-id="continue"]');
 const q5r = await waitP5((s) => s.mode === 'explore' && s.chapter === 'ch3');
 check('[P5] 再読み込み後も、第3幕の屋根の見た目と、サエの立ち姿が戻る',
   q5r.roofs.sae === 'renewed' && q5r.roofs.isuke === 'worn' && q5r.styles.sae === 'cane' && !q5r.roofDayVisible, JSON.stringify({ roofs: q5r.roofs, styles: q5r.styles }));
+
+// ───────── Phase 5.5：橋の欄干（実際に歩かせる）と、室内での記録・読込 ─────────
+{
+  const pos = () => page.evaluate(() => ({ x: window.__yui.player.x, z: window.__yui.player.z, indoor: window.__yui.world.indoor }));
+  const faceNorth = () => page.evaluate(() => { const o = window.__yui.cameraRig.orbit; o.yaw = o.targetYaw = Math.PI; });
+  /** 橋の上の z に立って、左右（A/D）へ押し続けたときの x。 */
+  const pushSide = async (z, key) => {
+    await place(0, z, Math.PI);
+    await faceNorth();
+    await wait(300);
+    await page.keyboard.down(key);
+    await wait(2500);
+    await page.keyboard.up(key);
+    await wait(300);
+    return (await pos()).x;
+  };
+  const results55 = [];
+  for (const [where, z] of [['入口側の端', 20.25], ['中央', 23.0], ['出口側の端', 25.75]]) {
+    for (const key of ['KeyD', 'KeyA']) {
+      const x = await pushSide(z, key);
+      results55.push(`${where}${key === 'KeyD' ? '右' : '左'}:${x.toFixed(2)}`);
+      check(`[P5.5] 橋の${where}で${key === 'KeyD' ? '右' : '左'}の柵へ歩いても、柵を越えられない`, Math.abs(x) < 1.2, `x=${x.toFixed(2)}`);
+    }
+  }
+  // 正規の入口から出口へ（南→北）、出口から入口へ（北→南）歩いて渡れる
+  await place(0, 29, Math.PI);
+  await faceNorth();
+  const crossN = await holdUntil(['KeyW'], (s) => s.z < 17.5, 20000);
+  check('[P5.5] 橋の入口から出口まで歩いて渡れる（南→北）', crossN.z < 17.5, `z=${crossN.z.toFixed(2)}`);
+  const crossS = await holdUntil(['KeyS'], (s) => s.z > 28, 20000);
+  check('[P5.5] 橋の出口から入口まで歩いて渡れる（北→南）', crossS.z > 28, `z=${crossS.z.toFixed(2)}`);
+
+  // 室内で記録 → 再読み込み → 室内から再開。結帳を調べられ、外にも出られる
+  const in1 = await enterSaeHouse();
+  await place(-5, -2, 0);
+  await wait(400);
+  await page.evaluate(() => window.__yui.saveGame());
+  await page.reload({ waitUntil: 'networkidle0' });
+  await wait(2000);
+  await page.click('.notice-layer .menu-item[data-id="continue"]');
+  await wait(800);
+  const in2 = await pos();
+  check('[P5.5] 室内で記録して読み込むと、室内の同じ位置から再開する', in1.indoor && in2.indoor && Math.abs(in2.x + 5) < 0.3 && Math.abs(in2.z + 2) < 0.3, JSON.stringify({ in1, in2 }));
+  await place(1.4, -3.9, Math.PI);
+  const in3 = await waitFor((u) => u.target === 'ledger');
+  check('[P5.5] 読み込んだ後も、室内の結帳を調べられる（第3幕）', in3.target === 'ledger', String(in3.target));
+  await place(-0.3, 0.4, Math.PI);
+  const in3b = await waitFor((u) => u.target === 'irori');
+  await press('KeyE', (u) => u.dialogueVisible);
+  const in3c = await ui();
+  await finishDialogue();
+  check('[P5.5] 室内の囲炉裏を調べられる', in3b.target === 'irori' && in3c.dialogueVisible && (await page.evaluate(() => window.__yui.story.flagList())).includes('inspected:irori'), in3c.text);
+  const in4 = await leaveSaeHouse();
+  check('[P5.5] 読み込んだ後も、室内から外に出られる', !in4.indoor && in4.z > 7, JSON.stringify(in4));
+  await page.screenshot({ path: `${OUT}/shot-63-p55-exit.png` });
+}
 
 // 描画負荷（ソフトウェア描画のため FPS は参考にならない。描画呼び出し数で確認する）
 check('[P5] 描画呼び出し数が極端に増えていない（第1幕 300 以下・屋根葺きの日 450 以下）',

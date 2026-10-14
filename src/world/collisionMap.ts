@@ -66,6 +66,38 @@ export function waterwayColliders(): Collider[] {
   }));
 }
 
+/** 欄干の判定の半分の厚み。 */
+export const BRIDGE_RAIL_HALF_THICKNESS = 0.1;
+/** 欄干の内側の面（橋の中心線から）。描画の欄干（environment.ts の createBridge）と同じ位置。 */
+export const BRIDGE_RAIL_X = BRIDGE.halfWidth + 0.08;
+
+/**
+ * 橋の左右の欄干と、橋のたもとの石（Phase 5.5）。
+ * 水路の判定は水の幅しか塞がないため、欄干の両端（地面と橋が接する所）では横へ抜けられた。
+ * 欄干の全長に沿って判定を置き、入口と出口（橋の両端）は開けておく。
+ */
+export function bridgeColliders(): Collider[] {
+  const len = BRIDGE.endZ - BRIDGE.startZ;
+  // 描画の欄干は startZ + 0.3 〜 endZ - 0.3。柱の太さの分だけ両端を延ばす
+  const railHalfDepth = (len - 0.6) / 2 + 0.1;
+  const midZ = (BRIDGE.startZ + BRIDGE.endZ) / 2;
+  const rails: Collider[] = [-1, 1].map((side) => ({
+    kind: 'box' as const,
+    x: BRIDGE.x + side * BRIDGE_RAIL_X,
+    z: midZ,
+    halfWidth: BRIDGE_RAIL_HALF_THICKNESS,
+    halfDepth: railHalfDepth,
+    rotation: 0,
+  }));
+  const stones: Collider[] = [];
+  for (const z of [BRIDGE.startZ - 0.3, BRIDGE.endZ + 0.3]) {
+    for (const side of [-1, 1]) {
+      stones.push({ kind: 'box', x: BRIDGE.x + side * (BRIDGE.halfWidth + 0.35), z, halfWidth: 0.25, halfDepth: 0.25, rotation: 0 });
+    }
+  }
+  return [...rails, ...stones];
+}
+
 export interface CollisionMapSource {
   readonly buildings: readonly BuildingDef[];
   readonly props: readonly PropDef[];
@@ -101,6 +133,6 @@ export function buildCollisionMap(src: CollisionMapSource): Collider[] {
     halfDepth: FIELD.halfDepth,
     rotation: 0,
   });
-  colliders.push(...waterwayColliders());
+  colliders.push(...waterwayColliders(), ...bridgeColliders());
   return colliders;
 }

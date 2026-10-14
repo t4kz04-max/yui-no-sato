@@ -1,5 +1,6 @@
 import { smoothstep } from '../core/math';
 import { BRIDGE, WATERWAY } from './layout';
+import { SAE_INTERIOR, isInsideSaeHouse } from './saeInterior';
 
 /**
  * 地形の高さ（決定的な純粋関数）。
@@ -31,8 +32,12 @@ export function bridgeDeckHeight(z: number): number {
   return BRIDGE.baseHeight + Math.sin(Math.PI * t) * BRIDGE.archHeight;
 }
 
-/** キャラクターが立つ面の高さ。地形と橋のうち高い方。 */
+/** サエ家の室内の床の高さ（家の足元の地形の高さ＋土台の高さ。室内は平らな床）。 */
+export const SAE_FLOOR_Y = terrainHeight(0, 0) + SAE_INTERIOR.floorLift;
+
+/** キャラクターが立つ面の高さ。地形と橋のうち高い方。サエ家の室内は平らな床。 */
 export function groundHeight(x: number, z: number): number {
+  if (isInsideSaeHouse(x, z)) return SAE_FLOOR_Y;
   const t = terrainHeight(x, z);
   return isOnBridge(x, z) ? Math.max(t, bridgeDeckHeight(z)) : t;
 }

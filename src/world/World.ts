@@ -31,6 +31,9 @@ import {
 } from './builders/environment';
 import type { RoofState, ThatchRoof } from './builders/thatch';
 import { mergeStaticMeshes } from '../render/mergeStatic';
+import { INTERIOR_LIGHT_INTENSITY, createSaeInterior, type SaeInterior } from './builders/interior';
+import { saeInteriorColliders } from './saeInterior';
+import { SAE_FLOOR_Y } from './terrain';
 
 export type { RoofState } from './builders/thatch';
 
@@ -65,6 +68,12 @@ export class World implements WalkableWorld {
   private readonly roofs = new Map<string, ThatchRoof>();
   /** 建物の置き場所（ID → 位置・向き・縮尺）。屋根葺きの日の足場などを家に合わせて置くために使う。 */
   readonly buildingRoots = new Map<string, THREE.Object3D>();
+  /** サエ家の室内（Phase 5.5）。屋内にいるときだけ表示し、当たり判定とカメラの遮蔽物を切り替える。 */
+  readonly interior: SaeInterior;
+  private readonly interiorColliders: readonly Collider[] = saeInteriorColliders();
+  private outdoorBlockers: THREE.Object3D[] = [];
+  private indoorBlockers: THREE.Object3D[] = [];
+  private indoorMode = false;
 
   constructor(options: WorldOptions = {}) {
     this.root.name = 'world';
@@ -77,6 +86,37 @@ export class World implements WalkableWorld {
     this.root.traverse((obj) => {
       if (obj.userData.cameraBlocker) this.cameraBlockers.push(obj);
     });
+    this.outdoorBlockers = [...this.cameraBlockers];
+    // 室内は結合した村とは別に持つ（屋内のときだけ表示する）
+    this.interior = createSaeInterior(this.palette, SAE_FLOOR_Y);
+    mergeStaticMeshes(this.interior.root);
+    this.root.add(this.interior.root);
+    // 明かりは常に表示される側に置き、強さだけを切り替える（表示を切り替えると明かりの数が変わり、シェーダーを作り直して一瞬止まるため）
+    for (const light of this.interior.lights) this.root.add(light);
+    this.interior.root.updateMatrixWorld(true);
+    const saeWalls: THREE.Object3D[] = [];
+    this.buildingRoots.get('sae')?.traverse((o) => {
+      if (o.name === 'house-wall') saeWalls.push(o);
+    });
+    this.indoorBlockers = [...saeWalls, ...this.interior.cameraBlockers];
+  }
+
+  get indoor(): boolean {
+    return this.indoorMode;
+  }
+
+  /**
+   * 屋内（サエ家の室内）に切り替える。当たり判定は室内のものだけにし、カメラの遮蔽物も室内の壁・天井にする。
+   * 屋外の当たり判定（家の外形の箱）は室内と重なるので、屋内では使わない。
+   */
+  setIndoor(indoor: boolean): void {
+    if (indoor === this.indoorMode) return;
+    this.indoorMode = indoor;
+    this.interior.root.visible = indoor;
+    this.interior.lights.forEach((l, i) => (l.intensity = indoor ? INTERIOR_LIGHT_INTENSITY[i] ?? 0 : 0));
+    this.cameraBlockers.length = 0;
+    this.cameraBlockers.push(...(indoor ? this.indoorBlockers : this.outdoorBlockers));
+    this.allColliders = this.combineColliders();
   }
 
   get colliders(): readonly Collider[] {
@@ -96,6 +136,7 @@ export class World implements WalkableWorld {
   }
 
   private combineColliders(): readonly Collider[] {
+    if (this.indoorMode) return this.interiorColliders;
     return [...this.baseColliders, ...this.npcColliders, ...this.extraColliders];
   }
 
@@ -172,6 +213,7 @@ export class World implements WalkableWorld {
         leanKaya: v?.leanKaya ?? false,
         southSide: southSideOf(b.rotation),
         damage: v?.damage ?? null,
+        hollow: v?.hollow ?? false,
         seed: hashId(b.id),
       });
       obj = house.root;

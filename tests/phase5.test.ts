@@ -294,9 +294,9 @@ describe('人物の見分けやすさ', () => {
 describe('村の配置（Phase 5 の変更）', () => {
   const colliders = buildCollisionMap({ buildings: BUILDINGS, props: PROPS, trees: TREES });
 
-  it('サエ家の南面の前（調べる場所・結帳・入口）に行ける', () => {
+  it('サエ家の南面の前（調べる場所・入口）に行ける', () => {
     const map = buildReachability(colliders, WALK_BOUNDS, PLAYER_START.position, DEFAULT_PLAYER_TUNING.radius);
-    for (const id of ['saeRoof', 'ledger']) {
+    for (const id of ['saeRoof', 'saeDoor']) {
       const def = INTERACTABLES.find((i) => i.id === id)!;
       expect(map.nearestReachable(def.position), id).toBeLessThan(def.range - 0.4);
     }

@@ -31,7 +31,7 @@ import { StoryState } from '../story/StoryState';
 import { CONSENT_LABEL } from '../story/types';
 import { InteractionSystem } from '../interaction/InteractionSystem';
 import { InteractionMarker } from '../interaction/InteractionMarker';
-import { ACTION_LABEL, type Interactable } from '../interaction/types';
+import { actionLabel, type Interactable } from '../interaction/types';
 import { CHARACTERS, VILLAGER_LOOKS, type CharacterId } from '../content/characters';
 import { npcStyle, roofDayStage, roofStates } from '../content/staging';
 import { RoofDayScene } from '../world/RoofDayScene';
@@ -64,6 +64,10 @@ import {
   forecastPlan,
 } from '../content/plan';
 import { evaluate, knows } from '../story/conditions';
+import { SAE_HOUSE_OPEN } from '../content/house';
+import { SAE_INTERIOR, isInsideSaeHouse } from '../world/saeInterior';
+import { DEFAULT_ORBIT_LIMITS, INDOOR_ORBIT_LIMITS } from '../camera/orbit';
+import { INDOOR_SKY_LIGHT_SCALE } from '../world/builders/interior';
 import { createSave, type SaveFile } from '../save/saveData';
 import { SaveStore, browserStorage } from '../save/SaveStore';
 import { allowsExploration, nextMode, type UiAction, type UiMode } from './modes';
@@ -138,6 +142,13 @@ export class Game {
   private readonly explainView: ExplainView;
   /** 屋根葺きの日の作業の場（足場・茅の山・手伝いに来た村の人たち）。 */
   private readonly roofDay: RoofDayScene;
+  /** 屋外にいたときのカメラの角度と距離（室内から出たら戻す）。 */
+  private outdoorCamera: { pitch: number; distance: number } | null = null;
+  /** 空の光（屋内では強める）。 */
+  private readonly skyLight: THREE.HemisphereLight;
+  private readonly skyBase: number;
+  /** 出入りの暗転。 */
+  private readonly fadeEl: HTMLDivElement;
   /** 会話が終わったら、屋根葺きの日を終えて結果画面を出す。 */
   private endDayAfterDialogue = false;
   private readonly pauseMenu: MenuPanel;
@@ -162,6 +173,9 @@ export class Game {
 
   constructor(canvasRoot: HTMLElement, hudRoot: HTMLElement) {
     this.hud = new Hud(hudRoot);
+    this.fadeEl = document.createElement('div');
+    this.fadeEl.className = 'scene-fade';
+    hudRoot.appendChild(this.fadeEl);
     this.prompt = new InteractionPrompt(hudRoot);
     this.toasts = new Toasts(this.hud.rightColumn);
     this.dialogueBox = new DialogueBox(hudRoot, {
@@ -193,6 +207,8 @@ export class Game {
     this.disposers.push(bindResize(canvasRoot, this.renderer, this.camera));
 
     const lighting = setupLighting(this.scene);
+    this.skyLight = lighting.sky;
+    this.skyBase = lighting.sky.intensity;
     this.world = new World({
       npcColliders: npcColliders(),
       horizon: lighting.horizon,
@@ -426,6 +442,8 @@ export class Game {
     // 屋根葺きの日：茅を運ぶ人が動いたら、当たり判定を付け直す
     if (this.roofDay.update(dt, this.player)) this.world.setExtraColliders(this.roofDay.colliders());
     this.cameraRig.update(this.cameraFocus(partner), this.input.consumeOrbitInput(), dt);
+    // 室内の壁際などでカメラがすぐ後ろまで寄ったときは、主人公を隠して視界をふさがない
+    this.playerView.root.visible = this.cameraRig.currentDistance > 1.25;
     this.updateMarker(dt);
 
     this.renderer.render(this.scene, this.camera);
@@ -520,14 +538,71 @@ export class Game {
     orbit.targetDistance = Math.min(orbit.targetDistance, TALK_CAMERA.distance);
   }
 
+  // ───────── サエ家の出入り（Phase 5.5） ─────────
+
+  /** 入口で E：許しがあれば室内へ。 */
+  private enterSaeHouse(): void {
+    this.setIndoorMode(true);
+    const e = SAE_INTERIOR.entry;
+    this.placePlayerInPlace(e);
+    this.flashFade();
+  }
+
+  /** 室内の入口で E：外へ。 */
+  private leaveSaeHouse(): void {
+    this.setIndoorMode(false);
+    this.placePlayerInPlace(SAE_INTERIOR.exit);
+    this.flashFade();
+  }
+
+  /** 屋内・屋外を切り替える（当たり判定・カメラの遮蔽物・調べられる物・カメラの範囲・室内の明かり）。 */
+  private setIndoorMode(indoor: boolean): void {
+    if (this.world.indoor === indoor) return;
+    this.world.setIndoor(indoor);
+    this.interaction.setIndoor(indoor);
+    this.skyLight.intensity = this.skyBase * (indoor ? INDOOR_SKY_LIGHT_SCALE : 1);
+    const orbit = this.cameraRig.orbit;
+    if (indoor) {
+      this.outdoorCamera = { pitch: orbit.targetPitch, distance: orbit.targetDistance };
+      this.cameraRig.limits = INDOOR_ORBIT_LIMITS;
+      orbit.targetPitch = orbit.pitch = 0.42;
+      orbit.targetDistance = orbit.distance = 3.8;
+    } else {
+      this.cameraRig.limits = DEFAULT_ORBIT_LIMITS;
+      orbit.targetPitch = orbit.pitch = this.outdoorCamera?.pitch ?? 0.42;
+      orbit.targetDistance = orbit.distance = this.outdoorCamera?.distance ?? 10;
+      this.outdoorCamera = null;
+    }
+  }
+
+  /** 出入りのときの位置合わせ（章の移動ではないので、屋内・屋外は切り替えない）。 */
+  private placePlayerInPlace(p: { readonly x: number; readonly z: number; readonly heading: number }): void {
+    Object.assign(this.player, { x: p.x, z: p.z, heading: p.heading, velocityX: 0, velocityZ: 0 });
+    this.player.y = this.world.groundHeight(p.x, p.z);
+    this.cameraRig.reset(p.heading);
+  }
+
+  /** 出入りの短い暗転（黒から明けるだけ。操作は止めない）。 */
+  private flashFade(): void {
+    const el = this.fadeEl;
+    el.style.transition = 'none';
+    el.style.opacity = '1';
+    void el.offsetWidth;
+    el.style.transition = 'opacity 0.45s ease-out';
+    el.style.opacity = '0';
+  }
+
   private onInteractionEnded(id: string, cancelled: boolean): void {
     this.hud.setDialogueMode(false);
     this.dialogueBox.hide();
     this.restoreCamera();
     this.dispatch('dialogueEnded');
+    const def = INTERACTABLES.find((i) => i.id === id);
+    // サエ家の出入り（記録より先に移る：記録した位置と屋内・屋外が食い違わないように）
+    if (!cancelled && def?.kind === 'object' && def.opens === 'enterHouse' && evaluate(SAE_HOUSE_OPEN, this.story)) this.enterSaeHouse();
+    if (!cancelled && def?.kind === 'object' && def.opens === 'leaveHouse') this.leaveSaeHouse();
     // 会話・調査のたびに自動で記録する（中断した場合も、それまでに確定したことを残す）
     this.saveGame();
-    const def = INTERACTABLES.find((i) => i.id === id);
     if (!cancelled && def?.kind === 'object' && def.opens === 'ledger') this.dispatch('openLedger');
     if (!cancelled && def?.kind === 'object' && def.opens === 'plan') this.openPlanBoard();
     // サエと話して屋根葺きの日を終えた → 結果画面
@@ -669,6 +744,8 @@ export class Game {
 
   /** 章が変わったときなど、決まった場所にプレイヤーを置き直す。 */
   private placePlayerAt(p: { x: number; z: number; heading: number }): void {
+    // 章が進むときは、屋外の決まった場所に置き直す
+    this.setIndoorMode(false);
     Object.assign(this.player, { x: p.x, z: p.z, heading: p.heading, velocityX: 0, velocityZ: 0 });
     this.player.y = this.world.groundHeight(p.x, p.z);
     this.cameraRig.reset(p.heading);
@@ -821,6 +898,8 @@ export class Game {
 
   private applySave(save: SaveFile): void {
     this.story.restore(save.story);
+    // 室内で記録していたら、室内から再開する（当たり判定も室内のものにしてから位置を確かめる）
+    this.setIndoorMode(isInsideSaeHouse(save.player.x, save.player.z));
     // 位置が歩けない場所（配置変更後の古い記録など）ならスタート地点に戻す
     const { x, z } = save.player;
     const b = this.world.bounds;
@@ -830,6 +909,7 @@ export class Game {
   }
 
   private resetToNewGame(): void {
+    this.setIndoorMode(false);
     this.story.restore();
     this.placePlayer({ ...PLAYER_START.position, heading: PLAYER_START.yaw });
   }
@@ -898,7 +978,7 @@ export class Game {
     const sx = (this.projected.x * 0.5 + 0.5) * canvas.clientWidth;
     const sy = (-this.projected.y * 0.5 + 0.5) * canvas.clientHeight;
     this.prompt.show(
-      { key: target.id, action: ACTION_LABEL[target.kind], label: target.label, done: this.interaction.isCompleted(target) },
+      { key: target.id, action: actionLabel(target), label: target.label, done: this.interaction.isCompleted(target) },
       sx,
       sy,
     );
