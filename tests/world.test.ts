@@ -14,6 +14,7 @@ import {
   WATERWAY,
   distanceToSegment,
 } from '../src/world/layout';
+import { buildReachability } from './helpers/reachability';
 import { bridgeDeckHeight, groundHeight, terrainHeight } from '../src/world/terrain';
 
 const colliders = buildCollisionMap({ buildings: BUILDINGS, props: PROPS, trees: TREES });
@@ -54,71 +55,15 @@ describe('当たり判定マップ', () => {
 });
 
 describe('到達可能性', () => {
-  // 0.5m 間隔の格子で、スタート地点から歩いて行ける範囲を塗りつぶす
-  const step = 0.5;
-  const nx = Math.floor((WALK_BOUNDS.maxX - WALK_BOUNDS.minX) / step);
-  const nz = Math.floor((WALK_BOUNDS.maxZ - WALK_BOUNDS.minZ) / step);
-  const toX = (i: number) => WALK_BOUNDS.minX + i * step;
-  const toZ = (j: number) => WALK_BOUNDS.minZ + j * step;
-  const free = new Uint8Array(nx * nz);
-  for (let j = 0; j < nz; j++) {
-    for (let i = 0; i < nx; i++) {
-      const x = toX(i);
-      const z = toZ(j);
-      const inBounds =
-        x >= WALK_BOUNDS.minX + radius &&
-        x <= WALK_BOUNDS.maxX - radius &&
-        z >= WALK_BOUNDS.minZ + radius &&
-        z <= WALK_BOUNDS.maxZ - radius;
-      free[j * nx + i] = inBounds && !overlapsAny({ x, z }, radius, colliders) ? 1 : 0;
-    }
-  }
-  const reached = new Uint8Array(nx * nz);
-  const si = Math.round((PLAYER_START.position.x - WALK_BOUNDS.minX) / step);
-  const sj = Math.round((PLAYER_START.position.z - WALK_BOUNDS.minZ) / step);
-  const queue: number[] = [sj * nx + si];
-  reached[sj * nx + si] = 1;
-  while (queue.length) {
-    const idx = queue.pop()!;
-    const i = idx % nx;
-    const j = (idx - i) / nx;
-    for (const [di, dj] of [
-      [1, 0],
-      [-1, 0],
-      [0, 1],
-      [0, -1],
-    ] as const) {
-      const ni = i + di;
-      const nj = j + dj;
-      if (ni < 0 || nj < 0 || ni >= nx || nj >= nz) continue;
-      const n = nj * nx + ni;
-      if (free[n] && !reached[n]) {
-        reached[n] = 1;
-        queue.push(n);
-      }
-    }
-  }
+  const map = buildReachability(colliders, WALK_BOUNDS, PLAYER_START.position, radius);
 
   it.each(LOCATIONS.map((l) => [l.label, l] as const))('スタート地点から「%s」の近くまで歩いて行ける', (_, loc) => {
-    let best = Infinity;
-    for (let j = 0; j < nz; j++) {
-      for (let i = 0; i < nx; i++) {
-        if (!reached[j * nx + i]) continue;
-        best = Math.min(best, Math.hypot(toX(i) - loc.position.x, toZ(j) - loc.position.z));
-      }
-    }
     // 建物の中心を地点としているので、建物の大きさ＋数mまで近づければよい
-    expect(best).toBeLessThan(10);
+    expect(map.nearestReachable(loc.position)).toBeLessThan(10);
   });
 
   it('村の歩ける範囲の大部分が、スタート地点からつながっている', () => {
-    let freeCount = 0;
-    let reachedCount = 0;
-    for (let k = 0; k < free.length; k++) {
-      freeCount += free[k]!;
-      reachedCount += reached[k]!;
-    }
-    expect(reachedCount / freeCount).toBeGreaterThan(0.97);
+    expect(map.reachedCount / map.freeCount).toBeGreaterThan(0.97);
   });
 });
 

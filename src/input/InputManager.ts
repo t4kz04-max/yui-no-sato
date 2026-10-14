@@ -17,7 +17,7 @@ export class InputManager {
   private dragPointerId: number | null = null;
   private lastPointerX = 0;
   private lastPointerY = 0;
-  /** false の間は移動・視点入力を無視する（Phase 1 の会話中の操作制御で使う想定）。 */
+  /** false の間は移動・視点入力を無視する（会話・調査中の操作制御）。キーの単発入力は引き続き記録する。 */
   enabled = true;
 
   private readonly listeners: Array<() => void> = [];
@@ -93,8 +93,8 @@ export class InputManager {
     } else {
       this.pressed.delete(e.code);
     }
-    // 矢印キーでのスクロールや F3（ブラウザの検索）を抑止する
-    if (e.code.startsWith('Arrow') || e.code === 'F3') e.preventDefault();
+    // 矢印キー・Space でのスクロールや F3（ブラウザの検索）を抑止する
+    if (e.code.startsWith('Arrow') || e.code === 'F3' || e.code === 'Space') e.preventDefault();
   }
 
   private onPointerDown(e: PointerEvent): void {

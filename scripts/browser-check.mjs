@@ -1,6 +1,7 @@
 /**
- * ブラウザでの動作確認（Phase 0）。Vite 開発サーバーを起動し、ヘッドレス Chrome で
- * 起動・移動・衝突・カメラ・ズーム・リサイズ・コンソールエラーを確認する。
+ * ブラウザでの動作確認。Vite 開発サーバーを起動し、ヘッドレス Chrome で確認する。
+ * - Phase 0：起動・移動・衝突・カメラ・ズーム・リサイズ・コンソールエラー
+ * - Phase 1（[P1]）：案内表示、会話の開始・送り・選択・終了、会話中の操作制御、調査、状態による選択肢の変化
  *
  *   npm run test:browser
  *
@@ -167,6 +168,158 @@ for (const [name, x, z, yaw, pitch, dist] of views) {
   await wait(900);
   await page.screenshot({ path: `${OUT}/shot-${name}.png` });
 }
+
+// ───────── Phase 1：探索・インタラクション ─────────
+const ui = () =>
+  page.evaluate(() => {
+    const g = window.__yui;
+    const q = (s) => document.querySelector(s);
+    const layer = q('.dialogue-layer');
+    const prompt = q('.interaction-prompt');
+    const name = q('.dialogue-name');
+    return {
+      objective: q('.hud-objective-text')?.textContent ?? '',
+      promptVisible: !!prompt && !prompt.hidden,
+      promptText: prompt?.textContent ?? '',
+      dialogueVisible: !!layer && !layer.hidden,
+      speaker: name && !name.hidden && !name.classList.contains('is-subject') ? name.textContent : null,
+      subject: name && !name.hidden && name.classList.contains('is-subject') ? name.textContent : null,
+      text: q('.dialogue-text')?.textContent ?? '',
+      choices: [...document.querySelectorAll('.dialogue-choice')].map((b) => ({ text: b.textContent, selected: b.classList.contains('is-selected') })),
+      active: g.interaction.isActive,
+      target: g.interaction.target?.id ?? null,
+      flags: g.story.snapshot(),
+      inputEnabled: g.input.enabled,
+      node: g.interaction.view?.nodeId ?? null,
+    };
+  });
+const place = (x, z, heading) =>
+  page.evaluate((x, z, heading) => {
+    const p = window.__yui.player; p.x = x; p.z = z; p.heading = heading; p.velocityX = 0; p.velocityZ = 0;
+  }, x, z, heading);
+const waitFor = async (cond, timeoutMs = 8000) => {
+  const t0 = Date.now();
+  let u = await ui();
+  while (!cond(u) && Date.now() - t0 < timeoutMs) { await wait(100); u = await ui(); }
+  return u;
+};
+/** キーを押して、状態が変わるまで待つ（低 FPS でも確実に1回ずつ処理させる）。 */
+const press = async (key, cond = () => true, timeoutMs = 4000) => {
+  await page.keyboard.press(key);
+  return waitFor(cond, timeoutMs);
+};
+/** 会話が終わるまで送る（選択肢が出たら pick で選ぶ）。 */
+const finishDialogue = async (pick = () => 'Digit1') => {
+  for (let i = 0; i < 40; i++) {
+    const u = await ui();
+    if (!u.active) return u;
+    const before = `${u.text}|${u.choices.length}`;
+    const key = u.choices.length > 0 ? pick(u) : 'KeyE';
+    await press(key, (n) => !n.active || `${n.text}|${n.choices.length}` !== before);
+  }
+  return ui();
+};
+
+const u0 = await ui();
+check('[P1] 右上に目的が表示される', u0.objective === '広場にいるトキに話しかける', u0.objective);
+
+// トキの手前（南側）に立ち、北（トキの方）を向く
+await place(-3, 20.4, Math.PI);
+const u1 = await waitFor((u) => u.promptVisible);
+check('[P1] 住民に近づくと「E 話す」の案内が出る', u1.promptVisible && /話す/.test(u1.promptText) && /トキ/.test(u1.promptText), u1.promptText);
+await page.screenshot({ path: `${OUT}/shot-10-prompt.png` });
+
+// 範囲外では案内が出ない
+await place(-3, 26, Math.PI);
+const uFar = await waitFor((u) => !u.promptVisible);
+check('[P1] 離れると案内が消える', !uFar.promptVisible && uFar.target === null);
+
+await place(-3, 20.4, Math.PI);
+await waitFor((u) => u.target === 'toki');
+const u2 = await press('KeyE', (u) => u.dialogueVisible);
+check('[P1] E で会話が始まり、話し手の名前と台詞が出る', u2.active && u2.dialogueVisible && u2.speaker === 'トキ', `${u2.speaker}：${u2.text}`);
+check('[P1] 会話中は案内表示を消し、移動入力を止める', !u2.promptVisible && u2.inputEnabled === false);
+
+// 会話中の操作制御：移動キー・ドラッグ・ホイールが効かない
+await wait(1500); // 会話用のカメラ構図へ移るのを待つ
+const orbitTargets = () => page.evaluate(() => { const o = window.__yui.cameraRig.orbit; return { yaw: o.targetYaw, dist: o.targetDistance, pitch: o.targetPitch }; });
+const camBefore = await orbitTargets();
+const posBefore = await state();
+await page.keyboard.down('KeyD');
+await page.keyboard.down('ShiftLeft');
+await wait(1200);
+await page.keyboard.up('ShiftLeft');
+await page.keyboard.up('KeyD');
+await page.mouse.move(400, 300);
+await page.mouse.down();
+for (let i = 1; i <= 8; i++) await page.mouse.move(400 + i * 25, 300);
+await page.mouse.up();
+for (let i = 0; i < 5; i++) { await page.mouse.wheel({ deltaY: 300 }); await wait(30); }
+await wait(500);
+const posAfter = await state();
+const camAfter = await orbitTargets();
+const moved = Math.hypot(posAfter.x - posBefore.x, posAfter.z - posBefore.z);
+check('[P1] 会話中は移動キーで動かない', moved < 0.05, `移動量 ${moved.toFixed(3)}`);
+check('[P1] 会話中はドラッグ・ホイールでカメラが動かない', JSON.stringify(camBefore) === JSON.stringify(camAfter), `${JSON.stringify(camBefore)} → ${JSON.stringify(camAfter)}`);
+await page.screenshot({ path: `${OUT}/shot-11-dialogue.png` });
+
+// 選択肢が出るまで送る（クリックでの送り・文字送り中の全文表示を含む）
+let u3 = await ui();
+for (let i = 0; i < 10 && u3.choices.length === 0; i++) {
+  const before = u3.text;
+  await page.mouse.click(640, 200);
+  u3 = await waitFor((u) => u.text !== before || u.choices.length > 0, 3000);
+}
+check('[P1] クリックで送ると選択肢が出る', u3.active && u3.choices.length === 2, u3.choices.map((c) => c.text).join(' / '));
+const u4 = await press('ArrowDown', (u) => u.choices[1]?.selected === true);
+check('[P1] ↓キーで選択中の選択肢が移る', u4.choices[1]?.selected === true && u4.choices[0]?.selected === false);
+await page.screenshot({ path: `${OUT}/shot-12-choices.png` });
+// 「まず何をすればいい？」を数字キーで選ぶ
+const u5 = await press('Digit1', (u) => u.choices.length === 0);
+check('[P1] 数字キーで選択肢を選ぶと会話が進む', u5.active && u5.node === 'whatToDo', `${u5.node}：${u5.text}`);
+const u6 = await finishDialogue();
+check('[P1] 会話を終えると探索に戻り、会話済みが記録される', !u6.active && !u6.dialogueVisible && u6.inputEnabled && u6.flags.includes('talked:toki'), u6.flags.join(','));
+check('[P1] 進行に応じて目的が更新される', u6.objective === 'サエ家を訪ねる', u6.objective);
+// 会話終了の E で、すぐに次の会話が始まらない
+await wait(600);
+check('[P1] 会話を終えた直後に同じ相手との会話が再開しない', !(await ui()).active);
+
+// 探索に戻ったら動ける
+const pr0 = await state();
+const pr1 = await holdUntil(['KeyS'], (s) => Math.hypot(s.x - pr0.x, s.z - pr0.z) > 1, 8000);
+check('[P1] 会話の後は再び移動できる', Math.hypot(pr1.x - pr0.x, pr1.z - pr0.z) > 1);
+
+// 調査：はさ掛け（伊助の畑）
+await place(38, 10.4, Math.PI);
+const u7 = await waitFor((u) => u.target === 'hasaRack' && u.promptVisible);
+check('[P1] 調べられる物に近づくと「E 調べる」の案内が出る', u7.promptVisible && /調べる/.test(u7.promptText) && /はさ掛け/.test(u7.promptText), u7.promptText);
+const u8 = await press('KeyE', (u) => u.dialogueVisible);
+check('[P1] 調査は地の文で表示され、調べている物の名前が出る', u8.active && u8.speaker === null && u8.subject === 'はさ掛け' && u8.text.length > 0, `${u8.subject}：${u8.text}`);
+await page.screenshot({ path: `${OUT}/shot-13-inspect.png` });
+const u9 = await finishDialogue();
+check('[P1] 調査を終えると調査済みが記録される', !u9.active && u9.flags.includes('inspected:hasaRack'));
+const u9b = await waitFor((u) => u.promptVisible);
+check('[P1] 調査済みの対象には「済」が付く', /済/.test(u9b.promptText), u9b.promptText);
+
+// 調べた情報で、伊助の選択肢が増える
+await place(33.5, 8.1, Math.PI);
+await waitFor((u) => u.target === 'isuke');
+await press('KeyE', (u) => u.dialogueVisible);
+let u10 = await ui();
+for (let i = 0; i < 10 && u10.choices.length === 0; i++) {
+  const before = u10.text;
+  u10 = await press('KeyE', (u) => u.text !== before || u.choices.length > 0, 3000);
+}
+const clueIndex = u10.choices.findIndex((c) => /はさ掛け/.test(c.text));
+check('[P1] 調べた情報によって会話の選択肢が増える', clueIndex >= 0, u10.choices.map((c) => c.text).join(' / '));
+await page.screenshot({ path: `${OUT}/shot-14-new-choice.png` });
+// マウスで選ぶ
+const buttons = await page.$$('.dialogue-choice');
+if (clueIndex >= 0 && buttons[clueIndex]) await buttons[clueIndex].click();
+await waitFor((u) => u.choices.length === 0);
+const u11 = await finishDialogue();
+check('[P1] クリックで選択肢を選び、知った事情が状態に残る', !u11.active && u11.flags.includes('fact:isukeHarvest'), u11.flags.join(','));
+await page.evaluate(() => { const o = window.__yui.cameraRig.orbit; o.targetYaw = Math.PI; o.targetPitch = 0.42; o.targetDistance = 10; });
 
 // F3 デバッグ表示
 await page.keyboard.press('F3');

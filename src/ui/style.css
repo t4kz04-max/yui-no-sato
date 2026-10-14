@@ -126,3 +126,265 @@ body {
 [hidden] {
   display: none !important;
 }
+
+/* ───────── Phase 1：目的・地点名 ───────── */
+
+.hud-objective {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  max-width: min(320px, calc(100% - 32px));
+  padding: 8px 14px 9px;
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-left: 3px solid var(--hud-accent);
+  border-radius: 8px;
+  backdrop-filter: blur(6px);
+}
+
+.hud-objective-label {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--hud-accent);
+  opacity: 0.9;
+}
+
+.hud-objective-text {
+  margin-top: 2px;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.hud-objective.is-updated {
+  animation: objective-flash 1.6s ease-out;
+}
+
+@keyframes objective-flash {
+  0% {
+    box-shadow: 0 0 0 0 rgba(227, 194, 122, 0.7);
+    transform: translateY(-4px);
+  }
+  30% {
+    transform: translateY(0);
+  }
+  100% {
+    box-shadow: 0 0 0 14px rgba(227, 194, 122, 0);
+  }
+}
+
+.hud-area {
+  position: absolute;
+  top: 14%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 28px;
+  font-size: 22px;
+  letter-spacing: 0.3em;
+  color: #fbf4e6;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  border-top: 1px solid rgba(255, 240, 220, 0.45);
+  border-bottom: 1px solid rgba(255, 240, 220, 0.45);
+  opacity: 0;
+  transition: opacity 0.6s ease;
+  white-space: nowrap;
+}
+
+.hud-area.is-visible {
+  opacity: 1;
+}
+
+/* ───────── Phase 1：操作できる対象の案内 ───────── */
+
+.interaction-prompt {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px 5px 6px;
+  background: rgba(28, 24, 20, 0.78);
+  border: 1px solid rgba(255, 240, 220, 0.22);
+  border-radius: 999px;
+  font-size: 14px;
+  white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  animation: prompt-in 0.18s ease-out;
+}
+
+@keyframes prompt-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.interaction-prompt kbd {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--hud-accent);
+  color: #2b2118;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.interaction-prompt-action {
+  color: var(--hud-accent);
+}
+
+.interaction-prompt-label {
+  font-weight: 600;
+}
+
+.interaction-prompt-done {
+  font-size: 11px;
+  padding: 0 5px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 240, 220, 0.35);
+  opacity: 0.7;
+}
+
+/* ───────── Phase 1：会話ウィンドウ ───────── */
+
+.dialogue-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 16px 28px;
+  cursor: pointer;
+  /* 下側を少し暗くして文字を読みやすくする */
+  background: linear-gradient(to top, rgba(10, 8, 6, 0.45), rgba(10, 8, 6, 0) 45%);
+}
+
+.dialogue-box {
+  position: relative;
+  width: min(780px, 100%);
+  min-height: 132px;
+  padding: 26px 30px 22px;
+  background: linear-gradient(rgba(36, 30, 24, 0.93), rgba(24, 20, 16, 0.95));
+  border: 1px solid rgba(255, 240, 220, 0.18);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 240, 220, 0.06);
+}
+
+.dialogue-name {
+  position: absolute;
+  top: -15px;
+  left: 22px;
+  padding: 3px 16px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #2b2118;
+  background: var(--hud-accent);
+  border-radius: 6px;
+}
+
+.dialogue-name.is-subject {
+  color: var(--hud-accent);
+  background: rgba(28, 24, 20, 0.95);
+  border: 1px solid rgba(227, 194, 122, 0.55);
+  font-weight: 600;
+}
+
+.dialogue-text {
+  font-size: 17px;
+  line-height: 1.85;
+  white-space: pre-wrap;
+  min-height: 3.7em;
+}
+
+.dialogue-text.is-narration {
+  color: #d9cdb8;
+}
+
+.dialogue-next {
+  position: absolute;
+  right: 18px;
+  bottom: 10px;
+  font-size: 12px;
+  color: var(--hud-accent);
+  animation: next-bob 1s ease-in-out infinite;
+}
+
+@keyframes next-bob {
+  50% {
+    transform: translateY(3px);
+  }
+}
+
+.dialogue-choices {
+  width: min(780px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.dialogue-choice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: min(340px, 100%);
+  max-width: 100%;
+  padding: 9px 18px 9px 10px;
+  font: inherit;
+  font-size: 15px;
+  text-align: left;
+  color: var(--hud-text);
+  background: rgba(28, 24, 20, 0.88);
+  border: 1px solid rgba(255, 240, 220, 0.18);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, transform 0.12s;
+}
+
+.dialogue-choice.is-selected {
+  background: rgba(74, 58, 36, 0.95);
+  border-color: var(--hud-accent);
+  transform: translateX(-6px);
+}
+
+.dialogue-choice-num {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--hud-accent);
+  border: 1px solid rgba(227, 194, 122, 0.5);
+}
+
+/* 会話中は探索用の表示を控える */
+#hud.is-dialogue .hud-help,
+#hud.is-dialogue .interaction-prompt,
+#hud.is-dialogue .hud-area {
+  display: none;
+}
+
+#hud.is-dialogue .hud-objective {
+  opacity: 0.45;
+}
+
+@media (max-width: 640px) {
+  .dialogue-box {
+    padding: 22px 18px 18px;
+  }
+  .dialogue-text {
+    font-size: 15px;
+  }
+  .hud-help {
+    display: none;
+  }
+}

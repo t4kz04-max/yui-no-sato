@@ -40,9 +40,10 @@ export class World implements WalkableWorld {
   /** カメラの壁抜け防止に使うメッシュ。 */
   readonly cameraBlockers: THREE.Object3D[] = [];
 
-  constructor() {
+  /** @param extraColliders 配置データ以外の障害物（住民の立ち位置など）。 */
+  constructor(extraColliders: readonly Collider[] = []) {
     this.root.name = 'world';
-    this.colliders = buildCollisionMap({ buildings: BUILDINGS, props: PROPS, trees: TREES });
+    this.colliders = [...buildCollisionMap({ buildings: BUILDINGS, props: PROPS, trees: TREES }), ...extraColliders];
     this.build();
     this.root.updateMatrixWorld(true);
     this.root.traverse((obj) => {
