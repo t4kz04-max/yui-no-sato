@@ -9,9 +9,20 @@
  * - ポーズ：Esc＝再開
  * - お知らせ（続きから／最初から 等）：ボタンでのみ閉じる（Esc で誤って選ばないように）
  * - 作業台：Esc＝閉じる、Tab＝手帳へ（手帳と見比べて考えられるように）
- * - 結果：Esc・閉じるで村に戻る（決定はすでに確定しているので、閉じても何も失われない）
+ * - 結果・エンディング：Esc・閉じるで村に戻る（決定はすでに確定しているので、閉じても何も失われない）
+ * - 史実と創作の解説：ポーズ画面・エンディングから開く。Esc・閉じるで村に戻る
  */
-export type UiMode = 'explore' | 'dialogue' | 'notebook' | 'ledger' | 'plan' | 'result' | 'pause' | 'notice';
+export type UiMode =
+  | 'explore'
+  | 'dialogue'
+  | 'notebook'
+  | 'ledger'
+  | 'plan'
+  | 'result'
+  | 'ending'
+  | 'explain'
+  | 'pause'
+  | 'notice';
 
 export type UiAction =
   | 'esc'
@@ -23,6 +34,8 @@ export type UiAction =
   | 'openLedger'
   | 'openPlan'
   | 'openResult'
+  | 'openEnding'
+  | 'openExplain'
   | 'openNotebook'
   | 'openNotice'
   /** 画面の「閉じる」「再開」ボタン、またはお知らせへの回答。 */
@@ -37,6 +50,7 @@ export function nextMode(mode: UiMode, action: UiAction): UiMode {
       if (action === 'openLedger') return 'ledger';
       if (action === 'openPlan') return 'plan';
       if (action === 'openResult') return 'result';
+      if (action === 'openEnding') return 'ending';
       if (action === 'openNotice') return 'notice';
       return mode;
     case 'dialogue':
@@ -60,9 +74,17 @@ export function nextMode(mode: UiMode, action: UiAction): UiMode {
     case 'result':
       if (action === 'esc' || action === 'close') return 'explore';
       return mode;
+    case 'ending':
+      if (action === 'esc' || action === 'close') return 'explore';
+      if (action === 'openExplain') return 'explain';
+      return mode;
+    case 'explain':
+      if (action === 'esc' || action === 'close') return 'explore';
+      return mode;
     case 'pause':
       if (action === 'esc' || action === 'close') return 'explore';
       if (action === 'openNotebook') return 'notebook';
+      if (action === 'openExplain') return 'explain';
       if (action === 'openNotice') return 'notice';
       return mode;
     case 'notice':

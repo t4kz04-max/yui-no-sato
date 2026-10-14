@@ -1,6 +1,7 @@
 import type { HouseholdId, RequestDef, StoryDefinitions, TopicDef } from '../story/types';
 import { CHARACTERS } from './characters';
-import { PLANNING } from './plan';
+import { PLAN_ROOF } from './plan';
+import { PLAN_ISUKE_ROOF } from './plan3';
 
 /**
  * 情報（トピック）・依頼・家の定義。docs/STATE_TABLE.md の第2〜3節と対応する。
@@ -43,7 +44,13 @@ const topicList: readonly TopicDef[] = [
     stages: [
       { id: 'worn', category: 'known', summary: '屋根は傷んでいて、葺き替えが要る', text: '茅が黒ずんで薄くなっている所がある。葺き替えが必要なのは確かだ。' },
       { id: 'worse', category: 'known', summary: '待つあいだに傷みが広がった', text: '葺き替えを待つあいだに、屋根の傷みが広がった。' },
-      { id: 'renewed', category: 'known', summary: '屋根は葺き替えられた', text: 'サエ家の屋根は葺き替えられた。' },
+      {
+        id: 'partial',
+        category: 'known',
+        summary: '傷みのひどい所だけ葺き替えた',
+        text: '手持ちの茅で、傷みのひどい所だけを葺き替えた。残りは来年以降に持ち越し。',
+      },
+      { id: 'renewed', category: 'known', summary: '南面は葺き替えられた', text: 'サエ家の屋根の南面は、すべて葺き替えられた。' },
     ],
   },
   {
@@ -111,6 +118,13 @@ const topicList: readonly TopicDef[] = [
         summary: '予定日なら来られるが、動けない日もある',
         text: '宗平は予定日なら来られる。ただ、別の用事で動けない日もある（どの日かはまだ聞いていない）。',
       },
+      // 🔶 暫定設定：宗平の別件＝村の茅場の茅刈りの段取り（docs/PHASE4_DESIGN.md §2）
+      {
+        id: 'kayaCutting',
+        category: 'known',
+        summary: '刈り入れの後の頃は、茅場の茅刈りを仕切る',
+        text: '刈り入れが済む頃、宗平は村の茅場の茅刈りを仕切る役目がある。茅のことに詳しいミネなら、代われるかもしれない。',
+      },
     ],
   },
   {
@@ -130,6 +144,60 @@ const topicList: readonly TopicDef[] = [
         category: 'known',
         summary: '返し方の行き違いが、以前あった',
         text: '以前、返し方を決めないまま茅を貸し、年が経って互いの覚えが食い違ったことがある。だからミネは記録を大事にしている。',
+      },
+    ],
+  },
+  {
+    id: 'sae.kaya',
+    title: 'サエ家の茅',
+    person: 'sae',
+    stages: [
+      {
+        id: 'short',
+        category: 'known',
+        summary: '手持ちの茅では、傷みのひどい所しか葺けない',
+        text: 'サエ家の手持ちの茅は、傷みのひどい所を差し替える分しかない。南面をすっかり葺き直すなら、ミネ家から借りる必要がある。',
+      },
+    ],
+  },
+  {
+    // 🔶 暫定設定：ミネが茅刈りを仕切れば、新しい茅の当てで今の茅を貸せる（docs/PHASE4_DESIGN.md §3）
+    id: 'mine.cutting',
+    title: 'ミネと茅刈り',
+    person: 'mine',
+    stages: [
+      {
+        id: 'canLead',
+        category: 'known',
+        summary: '茅刈りを仕切るなら、茅を貸す余裕も出る',
+        text: 'ミネは宗平の代わりに茅刈りの段取りをできる。茅刈りを仕切れば新しい茅の当てがつくので、今ある茅を貸す余裕も出る。ただし、手は回らなくなる。',
+      },
+    ],
+  },
+  {
+    // 🔶 暫定設定：第3幕（三年後）、サエは夏に足を痛めている（docs/PHASE4_DESIGN.md §8）
+    id: 'sae.later',
+    title: '三年後のサエ',
+    person: 'sae',
+    stages: [
+      {
+        id: 'injured',
+        category: 'known',
+        summary: '足を痛め、屋根の上には上がれない',
+        text: 'サエは夏に足を痛めた。屋根の上の仕事はできないが、下で茅を受け渡したり、片付けたりすることならできる。',
+      },
+    ],
+  },
+  {
+    id: 'isuke.roof3',
+    title: '伊助家の屋根',
+    person: 'isuke',
+    stages: [
+      {
+        id: 'needsRoof',
+        category: 'known',
+        summary: '伊助家も屋根を葺き替える時が来た',
+        text: '伊助家の屋根も傷み、今年の秋に葺き替えたい。十五年前にサエ家を手伝った返しは、この時でいいと伊助は言っていた。',
       },
     ],
   },
@@ -154,6 +222,9 @@ export const REQUESTS: Readonly<Record<string, RequestDef>> = {
   lendKaya: { id: 'lendKaya', label: '茅の貸し出し' },
   showRecords: { id: 'showRecords', label: '貸し借りの控えを見せてもらう' },
   roofPrep: { id: 'roofPrep', label: '屋根葺き前日の準備の手伝い' },
+  coverSohei: { id: 'coverSohei', label: '宗平の茅刈りの段取りを代わる' },
+  isukeRoofHelp: { id: 'isukeRoofHelp', label: '伊助家の屋根葺きの手伝い' },
+  isukeRoofWithoutSae: { id: 'isukeRoofWithoutSae', label: 'サエ家に頼まずに葺くこと' },
 };
 
 /** 結帳・約束の当事者になる家。 */
@@ -170,5 +241,6 @@ export const STORY_DEFS: StoryDefinitions = {
   requests: REQUESTS,
   npcs: Object.keys(CHARACTERS),
   households: Object.keys(HOUSEHOLDS),
-  planning: PLANNING,
+  plans: { roof: PLAN_ROOF, isukeRoof: PLAN_ISUKE_ROOF },
+  planForChapter: (chapter) => (chapter === 'ch1' || chapter === 'roofDay' ? 'roof' : 'isukeRoof'),
 };

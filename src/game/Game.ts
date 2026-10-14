@@ -37,18 +37,31 @@ import { DIALOGUES } from '../content/dialogues';
 import { INTERACTABLES, NPCS, npcColliders } from '../content/interactables';
 import { currentObjective } from '../content/objectives';
 import { HOUSEHOLDS, STORY_DEFS } from '../content/story';
-import { LEDGER, LEDGER_NOTE, LEDGER_TITLE } from '../content/ledger';
+import { LEDGER_NOTE, LEDGER_TITLE } from '../content/ledger';
 import { buildLedger, buildNotebook, type JournalSources } from '../journal/models';
-import { buildOutcome, buildPlanBoard, describePlan, type PlanSources } from '../journal/planModels';
+import { buildOutcome, buildPlanBoard, describePlan, shownLines, type PlanSources } from '../journal/planModels';
+import { createPersonRig, type PersonAppearance } from '../characters/personRig';
+import {
+  ENDINGS,
+  INITIAL_PLAN3,
+  MEANWHILE,
+  RELEVANT_TOPICS3,
+  RESPONSE_SUMMARY3,
+  act1Summary,
+  forecastPlan3,
+} from '../content/plan3';
+import { EXPLAIN, PROMISES_KEPT_BY_CH3, ledgerEntries } from '../content/chronicle';
+import { EndingView, ExplainView, type EndingModel } from '../ui/StoryScreens';
 import {
   INITIAL_PLAN,
   OUTCOMES,
   PLANNING_AVAILABLE,
   RELEVANT_TOPICS,
   RESPONSE_SUMMARY,
+  VILLAGERS,
   forecastPlan,
 } from '../content/plan';
-import { evaluate } from '../story/conditions';
+import { evaluate, knows } from '../story/conditions';
 import { createSave, type SaveFile } from '../save/saveData';
 import { SaveStore, browserStorage } from '../save/SaveStore';
 import { allowsExploration, nextMode, type UiAction, type UiMode } from './modes';
@@ -58,14 +71,37 @@ import type { GameEvents } from './events';
 const TALK_CAMERA = { yawOffset: 0.85, pitch: 0.2, distance: 5.2 } as const;
 /** 案内表示を出す高さ（住民の頭上）。 */
 const NPC_PROMPT_HEIGHT = 2.55;
-const JOURNAL_SOURCES: JournalSources = { characters: CHARACTERS, households: HOUSEHOLDS, planSummaries: RESPONSE_SUMMARY };
+const JOURNAL_SOURCES: JournalSources = {
+  characters: CHARACTERS,
+  households: HOUSEHOLDS,
+  planSummaries: { ...RESPONSE_SUMMARY, ...RESPONSE_SUMMARY3 },
+};
 const PLAN_SOURCES: PlanSources = {
   ...JOURNAL_SOURCES,
-  summaries: RESPONSE_SUMMARY,
-  outcomes: OUTCOMES,
-  forecast: forecastPlan,
-  relevantTopics: RELEVANT_TOPICS,
+  plans: {
+    roof: {
+      summaries: RESPONSE_SUMMARY,
+      forecast: forecastPlan,
+      relevantTopics: RELEVANT_TOPICS,
+      outcomeTitle: (id) => OUTCOMES[id]?.title,
+      outcomeTagline: (id) => OUTCOMES[id]?.tagline,
+    },
+    isukeRoof: {
+      summaries: RESPONSE_SUMMARY3,
+      forecast: forecastPlan3,
+      relevantTopics: RELEVANT_TOPICS3,
+      outcomeTitle: (id) => (ENDINGS[id] ? `${ENDINGS[id].code} ${ENDINGS[id].title}` : undefined),
+      outcomeTagline: (id) => ENDINGS[id]?.title,
+    },
+  },
 };
+/** 屋根葺き当日に手伝いに来る村の人たちの見た目（名前のない人物）。 */
+const VILLAGER_LOOKS: readonly PersonAppearance[] = [
+  { cloth: 0x5a6b4a, limb: 0x2f3626, skin: 0xe6c3a2, hair: 0x1a1a1a, headwear: 'kerchief', headwearColor: 0xd8d0c0 },
+  { cloth: 0x6b4a3a, limb: 0x3a2a20, skin: 0xe2b896, hair: 0x2a2018, headwear: 'straw' },
+  { cloth: 0x45546a, limb: 0x252f3c, skin: 0xf0cfb0, hair: 0x1f1a17, headwear: 'none' },
+  { cloth: 0x7a6a48, limb: 0x3a3424, skin: 0xe6c3a2, hair: 0x5a554e, headwear: 'kerchief', headwearColor: 0x9a8a6a },
+];
 const NOTEBOOK_TAB_KEYS: ReadonlyArray<[string, NotebookTab]> = [
   ['Digit1', 'people'],
   ['Digit2', 'known'],
@@ -103,6 +139,12 @@ export class Game {
   private readonly ledger: LedgerView;
   private readonly planView: PlanView;
   private readonly resultView: ResultView;
+  private readonly endingView: EndingView;
+  private readonly explainView: ExplainView;
+  /** 屋根葺き当日に手伝いに来る村の人たち。 */
+  private readonly villagers = new THREE.Group();
+  /** 会話が終わったら、屋根葺きの日を終えて結果画面を出す。 */
+  private endDayAfterDialogue = false;
   private readonly pauseMenu: MenuPanel;
   private readonly notice: MenuPanel;
   private readonly toasts: Toasts;
@@ -146,7 +188,9 @@ export class Game {
       onClose: () => this.dispatch('close'),
       onNotebook: () => this.dispatch('openNotebook'),
     });
-    this.resultView = new ResultView(hudRoot, () => this.dispatch('close'));
+    this.resultView = new ResultView(hudRoot, () => this.onResultClosed());
+    this.endingView = new EndingView(hudRoot, { onClose: () => this.dispatch('close'), onExplain: () => this.dispatch('openExplain') });
+    this.explainView = new ExplainView(hudRoot, () => this.dispatch('close'));
     this.pauseMenu = new MenuPanel(hudRoot, 'pause-layer', (id) => this.onPauseItem(id));
     this.notice = new MenuPanel(hudRoot, 'notice-layer', (id) => this.noticeHandlers[id]?.());
 
@@ -158,6 +202,15 @@ export class Game {
     this.scene.add(this.world.root);
     this.scene.add(this.playerView.root);
     this.scene.add(this.marker.root);
+    VILLAGERS.forEach((v, i) => {
+      const rig = createPersonRig(VILLAGER_LOOKS[i % VILLAGER_LOOKS.length]!);
+      rig.root.position.set(v.position.x, this.world.groundHeight(v.position.x, v.position.z), v.position.z);
+      rig.root.rotation.y = v.heading;
+      rig.rightArm.rotation.x = -0.6;
+      this.villagers.add(rig.root);
+    });
+    this.villagers.visible = false;
+    this.scene.add(this.villagers);
     for (const npc of NPCS) {
       const character = CHARACTERS[npc.character as CharacterId];
       const view = new NpcView(npc, character.appearance, this.world.groundHeight(npc.position.x, npc.position.z));
@@ -241,9 +294,16 @@ export class Game {
       this.toasts.push('相談', `${who}：今の案への返事は「${CONSENT_LABEL[status]}」`);
       this.refreshNotebookBadge();
     });
+    this.events.on('flagSet', ({ flag }) => {
+      if (flag === 'roofDay:ended') this.endDayAfterDialogue = true;
+    });
+    this.events.on('chapterChanged', () => {
+      refreshObjective();
+      this.applyChapterToWorld();
+    });
     this.events.on('storyRestored', () => {
       refreshObjective();
-      this.applyOutcomeToWorld();
+      this.applyChapterToWorld();
       this.refreshNotebookBadge();
     });
     this.events.on('areaEntered', ({ location }) => {
@@ -269,14 +329,18 @@ export class Game {
     if (prev === 'ledger') this.ledger.hide();
     if (prev === 'plan') this.planView.hide();
     if (prev === 'result') this.resultView.hide();
+    if (prev === 'ending') this.endingView.hide();
+    if (prev === 'explain') this.explainView.hide();
     if (prev === 'pause') this.pauseMenu.hide();
     if (prev === 'notice') this.notice.hide();
 
     if (next === 'notebook') this.notebook.show(buildNotebook(this.story, JOURNAL_SOURCES), this.notebookSeenOrder);
-    if (next === 'ledger') this.ledger.show(buildLedger(this.story, this.ledgerEntries(), JOURNAL_SOURCES));
+    if (next === 'ledger') this.ledger.show(buildLedger(this.story, ledgerEntries(this.story), JOURNAL_SOURCES));
+    if (next === 'ending') this.endingView.show(this.endingModel());
+    if (next === 'explain') this.explainView.show(EXPLAIN);
     if (next === 'plan') this.planView.show(buildPlanBoard(this.story, PLAN_SOURCES));
     if (next === 'result') {
-      const outcome = buildOutcome(this.story, OUTCOMES, JOURNAL_SOURCES);
+      const outcome = buildOutcome(this.story, OUTCOMES, JOURNAL_SOURCES, 'roof');
       if (outcome) this.resultView.show(outcome);
     }
     if (next === 'pause') this.pauseMenu.show(this.pauseContent());
@@ -316,8 +380,16 @@ export class Game {
         break;
       case 'result':
         if (this.input.wasPressed('Escape') || this.input.wasPressed('Enter') || this.input.wasPressed('NumpadEnter')) {
+          this.onResultClosed();
+        }
+        break;
+      case 'ending':
+        if (this.input.wasPressed('Escape') || this.input.wasPressed('Enter') || this.input.wasPressed('NumpadEnter')) {
           this.dispatch('close');
         }
+        break;
+      case 'explain':
+        if (this.input.wasPressed('Escape')) this.dispatch('esc');
         break;
       case 'pause':
         if (this.input.wasPressed('Escape')) this.dispatch('esc');
@@ -450,15 +522,23 @@ export class Game {
     const def = INTERACTABLES.find((i) => i.id === id);
     if (!cancelled && def?.kind === 'object' && def.opens === 'ledger') this.dispatch('openLedger');
     if (!cancelled && def?.kind === 'object' && def.opens === 'plan') this.openPlanBoard();
+    // サエと話して屋根葺きの日を終えた → 結果画面
+    if (this.endDayAfterDialogue) {
+      this.endDayAfterDialogue = false;
+      this.dispatch('openResult');
+    }
   }
 
   // ───────── 計画（作業台） ─────────
 
   /** 作業台を開く。サエから日取りの話を聞くまでは開かない。初めて開いたときはサエの元の案を広げる。 */
   private openPlanBoard(): void {
+    const planId = this.story.activePlanId();
+    if (!planId) return;
     const decided = this.story.planPhase() === 'decided';
-    if (!decided && !evaluate(PLANNING_AVAILABLE, this.story)) return;
-    if (!decided && !this.story.planDraft()) this.story.setPlanDraft(INITIAL_PLAN);
+    const available = planId === 'roof' ? evaluate(PLANNING_AVAILABLE, this.story) : evaluate(knows('isuke.roof3'), this.story);
+    if (!decided && !available) return;
+    if (!decided && !this.story.planDraft()) this.story.setPlanDraft(planId === 'roof' ? INITIAL_PLAN : INITIAL_PLAN3);
     this.dispatch('openPlan');
   }
 
@@ -487,36 +567,105 @@ export class Game {
   }
 
   private decidePlan(): void {
+    const planId = this.story.activePlanId();
     const outcome = this.story.decidePlan({ source: '作業台で決めた' });
     if (!outcome) return;
-    this.applyOutcomeToWorld();
     this.saveGame();
-    this.dispatch('openResult');
+    if (planId === 'roof') {
+      // 屋根葺き当日へ（章は決定の効果で進んでいる）
+      this.placePlayerAt({ x: 1.5, z: 15.5, heading: Math.PI });
+      this.showNotice(
+        {
+          title: '屋根葺きの日',
+          body: '決めた段取りで、屋根葺きの日が来た。\n村を歩いて、誰がどこで何をしているか見て回ろう。サエと話すと一日を終えられる。',
+          items: [{ id: 'ok', label: '村に出る' }],
+        },
+        { ok: () => undefined },
+      );
+    } else {
+      this.dispatch('openEnding');
+    }
+  }
+
+  /** 結果画面を閉じたとき。屋根葺きの日の結果なら、三年後（第3幕）へ進む。 */
+  private onResultClosed(): void {
+    this.dispatch('close');
+    if (this.story.chapter !== 'roofDay') return;
+    const meanwhile = shownLines(this.story, MEANWHILE).join('\n');
+    this.showNotice(
+      {
+        title: 'それから三年後の秋',
+        body: `${meanwhile}\n今度は、伊助家の屋根を葺き替える時が来た。`,
+        items: [{ id: 'ok', label: '村に出る' }],
+      },
+      { ok: () => this.enterChapter3() },
+    );
+  }
+
+  private enterChapter3(): void {
+    for (const id of PROMISES_KEPT_BY_CH3) {
+      if (this.story.allPromises().some((p) => p.id === id)) this.story.set(`kept:${id}`);
+    }
+    this.story.setChapter('ch3');
+    this.placePlayerAt({ x: 0, z: 26, heading: Math.PI });
+    this.saveGame();
+  }
+
+  private endingModel(): EndingModel {
+    const decision = this.story.planDecision('isukeRoof');
+    const ending = decision ? ENDINGS[decision.outcome] : undefined;
+    const roof = this.story.planDecision('roof');
+    const added = ledgerEntries(this.story).filter((e) => e.id === 'L3' || e.id === 'L4');
+    const name = (h: string) => HOUSEHOLDS[h]?.name ?? h;
+    return {
+      code: ending?.code ?? '',
+      title: ending?.title ?? '',
+      story: ending ? [...shownLines(this.story, MEANWHILE), ...shownLines(this.story, ending.story)] : [],
+      choices: [
+        { label: '第1幕', text: act1Summary(roof?.outcome) },
+        { label: '第3幕', text: decision ? describePlan(this.story, decision.plan, 'isukeRoof') : '—' },
+      ],
+      records: added.flatMap((e) =>
+        e.items.map((i) => `${e.when}：${name(i.from)} → ${name(i.to)}　${i.detail}（${i.settlement === 'settled' ? '返し 済' : i.settlement === 'open' ? '返し まだ' : '取り決めなし'}）`),
+      ),
+    };
   }
 
   /**
    * 決めた計画の結果を村の様子に反映する（屋根の色・はさ掛け・住民の立ち位置と当たり判定）。
    * 決定前・やり直しのときは元の様子に戻す。
    */
-  private applyOutcomeToWorld(): void {
-    const outcome = this.story.outcome();
-    const def = outcome ? OUTCOMES[outcome] : undefined;
-    this.world.setSaeRoofRenewed(this.story.currentStage('sae.roof') === 'renewed');
+  private applyChapterToWorld(): void {
+    const chapter = this.story.chapter;
+    const roof = this.story.planDecision('roof');
+    const isukeRoof = this.story.planDecision('isukeRoof');
+    const def = chapter === 'roofDay' && roof ? OUTCOMES[roof.outcome] : undefined;
+    const saeStage = this.story.currentStage('sae.roof');
+    const saeDone = chapter === 'ch3' || chapter === 'end';
+    this.world.setRoofState('sae', saeDone ? (saeStage === 'renewed' ? 'renewed' : 'partial') : 'old');
+    this.world.setRoofState(
+      'isuke',
+      chapter === 'ch3' ? 'worn' : chapter === 'end' ? (isukeRoof?.outcome === 'e3' ? 'worn' : 'renewed') : 'old',
+    );
     this.world.setHarvestDone(def?.harvestDone ?? false);
+    this.villagers.visible = chapter === 'roofDay';
     for (const npc of NPCS) {
       const placement = def?.placements[npc.character] ?? null;
       this.interaction.setPlacement(npc.id, placement);
       const p = placement ?? { position: npc.position, heading: npc.heading };
       this.npcViews.get(npc.id)?.setHome(p.position.x, p.position.z, p.heading, this.world.groundHeight(p.position.x, p.position.z));
     }
-    this.world.setNpcColliders(npcColliders(this.interaction.interactables.filter((i) => i.kind === 'npc')));
+    const villagerColliders = this.villagers.visible
+      ? VILLAGERS.map((v) => ({ kind: 'circle' as const, x: v.position.x, z: v.position.z, radius: 0.4 }))
+      : [];
+    this.world.setNpcColliders([...npcColliders(this.interaction.interactables.filter((i) => i.kind === 'npc')), ...villagerColliders]);
   }
 
-  /** 結帳に載せる記録（過去の記録＋決めた計画の結果として書き加えられた記録）。 */
-  private ledgerEntries() {
-    const outcome = this.story.outcome();
-    const added = outcome ? OUTCOMES[outcome]?.ledger : undefined;
-    return added ? [...LEDGER, added] : LEDGER;
+  /** 章が変わったときなど、決まった場所にプレイヤーを置き直す。 */
+  private placePlayerAt(p: { x: number; z: number; heading: number }): void {
+    Object.assign(this.player, { x: p.x, z: p.z, heading: p.heading, velocityX: 0, velocityZ: 0 });
+    this.player.y = this.world.groundHeight(p.x, p.z);
+    this.cameraRig.reset(p.heading);
   }
 
   private restoreCamera(): void {
@@ -585,6 +734,7 @@ export class Game {
         { id: 'notebook', label: '手帳を開く［Tab］' },
         { id: 'save', label: '記録する' },
         { id: 'load', label: '最後の記録から再開する' },
+        { id: 'explain', label: '史実と創作について' },
         { id: 'new', label: '最初からやり直す' },
       ],
       defaultId: 'resume',
@@ -598,6 +748,8 @@ export class Game {
         return this.dispatch('close');
       case 'notebook':
         return this.dispatch('openNotebook');
+      case 'explain':
+        return this.dispatch('openExplain');
       case 'save': {
         const ok = this.saveGame();
         const time = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });

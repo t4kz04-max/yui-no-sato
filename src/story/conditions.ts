@@ -1,4 +1,4 @@
-import type { ConsentStatus, FlagId, HouseholdId, NpcId, PlanPhase, RequestId, StageId, TopicId } from './types';
+import type { Chapter, ConsentStatus, FlagId, HouseholdId, NpcId, PlanPhase, RequestId, StageId, TopicId } from './types';
 
 export type { FlagId } from './types';
 
@@ -30,8 +30,10 @@ export type Condition =
   | { readonly planPending: NpcId }
   /** 今の案に対するこの住民の返事の理由。 */
   | { readonly planReason: NpcId; readonly is: readonly string[] }
-  /** 決定した計画の結果。 */
-  | { readonly outcome: readonly string[] };
+  /** いずれかの計画で、この結果に決まった。 */
+  | { readonly outcome: readonly string[] }
+  /** 今の章。 */
+  | { readonly chapter: readonly Chapter[] };
 
 export type Effect =
   | { readonly type: 'setFlag'; readonly flag: FlagId }
@@ -43,6 +45,8 @@ export type Effect =
       readonly status: ConsentStatus;
       readonly note?: string;
     }
+  /** 章を進める。 */
+  | { readonly type: 'setChapter'; readonly chapter: Chapter }
   /** 今の案を住民に相談し、返事を記録する。 */
   | { readonly type: 'consultPlan'; readonly npc: NpcId }
   | {
@@ -66,7 +70,9 @@ export interface StoryQuery {
   isPlanPending(npc: NpcId): boolean;
   /** 今の案に対する返事の理由。 */
   planReason(npc: NpcId): string | undefined;
-  outcome(): string | undefined;
+  /** いずれかの計画で、この結果に決まったか。 */
+  hasOutcome(outcome: string): boolean;
+  readonly chapter: Chapter;
 }
 
 /** 条件なし（undefined）は常に成立する。 */
@@ -89,10 +95,8 @@ export function evaluate(condition: Condition | undefined, state: StoryQuery): b
     const reason = state.planReason(condition.planReason);
     return reason !== undefined && condition.is.includes(reason);
   }
-  if ('outcome' in condition) {
-    const outcome = state.outcome();
-    return outcome !== undefined && condition.outcome.includes(outcome);
-  }
+  if ('outcome' in condition) return condition.outcome.some((o) => state.hasOutcome(o));
+  if ('chapter' in condition) return condition.chapter.includes(state.chapter);
   const status = state.consentStatus(condition.consentOf, condition.request) ?? 'none';
   return condition.is.includes(status);
 }
@@ -153,3 +157,5 @@ export const planPending = (npc: NpcId): Condition => ({ planPending: npc });
 export const planReason = (npc: NpcId, ...is: string[]): Condition => ({ planReason: npc, is });
 export const outcomeIs = (...outcomes: string[]): Condition => ({ outcome: outcomes });
 export const consultPlan = (npc: NpcId): Effect => ({ type: 'consultPlan', npc });
+export const inChapter = (...chapters: Chapter[]): Condition => ({ chapter: chapters });
+export const setChapter = (chapter: Chapter): Effect => ({ type: 'setChapter', chapter });

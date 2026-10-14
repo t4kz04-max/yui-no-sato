@@ -32,6 +32,12 @@ import { mergeStaticMeshes } from '../render/mergeStatic';
  * 村の3D表現と、歩行に必要なデータ（当たり判定・地面の高さ）をまとめる。
  * 物語やゲーム状態は持たない。
  */
+export type RoofState = 'old' | 'renewed' | 'partial' | 'worn';
+
+const FRESH_THATCH = new THREE.Color(0xb39a64);
+const FRESH_THATCH_EDGE = new THREE.Color(0x9c8352);
+const WORN_THATCH = new THREE.Color(0x3e3428);
+
 export class World implements WalkableWorld {
   readonly root = new THREE.Group();
   private readonly baseColliders: readonly Collider[];
@@ -44,10 +50,8 @@ export class World implements WalkableWorld {
   /** カメラの壁抜け防止に使うメッシュ。 */
   readonly cameraBlockers: THREE.Object3D[] = [];
   /** サエ家の屋根の茅（葺き替えの前後で色を変えるため、他の家と共有しない）。 */
-  private saeThatch: THREE.MeshStandardMaterial[] = [];
-  private readonly freshThatch = new THREE.Color(0xb39a64);
-  private readonly freshThatchEdge = new THREE.Color(0x9c8352);
-  private oldThatch: THREE.Color[] = [];
+  /** 屋根の見た目を変えられる家（建物 ID → 茅のマテリアルと元の色）。他の家とは共有しない。 */
+  private readonly roofs = new Map<string, { materials: THREE.MeshStandardMaterial[]; base: THREE.Color[] }>();
 
   /** @param npcColliders 配置データ以外の障害物（住民の立ち位置）。 */
   constructor(npcColliders: readonly Collider[] = []) {
@@ -77,10 +81,19 @@ export class World implements WalkableWorld {
     if (this.harvestExtra) this.harvestExtra.visible = done;
   }
 
-  /** サエ家の屋根を、葺き替え前（古い茅）／葺き替え後（新しい茅）の見た目にする。 */
-  setSaeRoofRenewed(renewed: boolean): void {
-    this.saeThatch.forEach((m, i) => {
-      m.color.copy(renewed ? (i === 0 ? this.freshThatchEdge : this.freshThatch) : this.oldThatch[i]!);
+  /**
+   * 屋根の見た目を変える。old＝元の茅／renewed＝葺き替えたばかり／partial＝一部だけ新しい（中間の色）／worn＝さらに傷んだ。
+   */
+  setRoofState(buildingId: string, state: RoofState): void {
+    const roof = this.roofs.get(buildingId);
+    if (!roof) return;
+    roof.materials.forEach((m, i) => {
+      const base = roof.base[i]!;
+      const fresh = i === 0 ? FRESH_THATCH_EDGE : FRESH_THATCH;
+      if (state === 'old') m.color.copy(base);
+      else if (state === 'renewed') m.color.copy(fresh);
+      else if (state === 'partial') m.color.copy(base).lerp(fresh, 0.5);
+      else m.color.copy(base).lerp(WORN_THATCH, 0.45);
     });
   }
 
@@ -123,14 +136,13 @@ export class World implements WalkableWorld {
     obj.rotation.y = b.rotation;
     obj.scale.setScalar(b.scale);
     if (b.location) obj.userData.location = b.location;
-    if (b.id === 'sae') {
+    if (b.id === 'sae' || b.id === 'isuke') {
       // 屋根（複数マテリアルのメッシュ）の茅だけ専用のマテリアルにする
       obj.traverse((o) => {
         if (o instanceof THREE.Mesh && Array.isArray(o.material)) {
           const own = (o.material as THREE.MeshStandardMaterial[]).map((m) => m.clone());
           o.material = own;
-          this.saeThatch = own;
-          this.oldThatch = own.map((m) => m.color.clone());
+          this.roofs.set(b.id, { materials: own, base: own.map((m) => m.color.clone()) });
         }
       });
     }

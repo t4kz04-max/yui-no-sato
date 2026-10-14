@@ -221,7 +221,8 @@ describe('StoryState：保存と復元', () => {
       learned: [],
       npcs: [],
       promises: [],
-      plan: { draft: null, responses: [], decision: null },
+      chapter: 'ch1',
+      plans: {},
     });
   });
 });

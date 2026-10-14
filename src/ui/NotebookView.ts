@@ -116,7 +116,9 @@ export class NotebookView {
         if (m.promises.length === 0) body.push(empty('まだ約束はない。'));
         m.promises.forEach((p) => {
           const item = el('div', 'notebook-item');
-          item.append(el('div', 'notebook-item-title', `${p.from} → ${p.to}`), el('div', 'notebook-item-text', p.content));
+          const title = el('div', 'notebook-item-title', `${p.from} → ${p.to}`);
+          if (p.kept) title.append(el('span', 'badge-new', '果たした'));
+          item.append(title, el('div', 'notebook-item-summary', p.content));
           body.push(item);
         });
         break;

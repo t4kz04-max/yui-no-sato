@@ -77,7 +77,7 @@ export class LedgerView {
     const promises = el('section', 'ledger-entry ledger-promises');
     promises.append(el('div', 'ledger-entry-head', 'これからの約束'));
     if (model.promises.length === 0) promises.append(el('div', 'ledger-empty', 'まだ新しい約束は記されていない。'));
-    model.promises.forEach((p) => promises.append(el('div', 'ledger-item', `${p.from} → ${p.to}：${p.content}`)));
+    model.promises.forEach((p) => promises.append(el('div', 'ledger-item', `${p.from} → ${p.to}：${p.content}${p.kept ? '（果たした）' : ''}`)));
     parts.push(promises);
 
     this.bodyEl.replaceChildren(...parts);

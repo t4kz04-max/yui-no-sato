@@ -62,9 +62,20 @@ export interface StoryDefinitions {
   readonly requests: Readonly<Record<RequestId, RequestDef>>;
   readonly npcs: readonly NpcId[];
   readonly households: readonly HouseholdId[];
-  /** 計画の定義（Phase 3）。ないときは計画を扱わない。 */
-  readonly planning?: PlanningDefs;
+  /** 計画の定義（計画 ID → 定義）。ないときは計画を扱わない。 */
+  readonly plans?: Readonly<Record<PlanId, PlanningDefs>>;
+  /** その章で作業台に広げる計画（なければ null）。 */
+  readonly planForChapter?: (chapter: Chapter) => PlanId | null;
 }
+
+/**
+ * 章。ch1＝第1幕・第2幕（探索と計画）／roofDay＝屋根葺き当日／ch3＝第3幕（三年後）／end＝エンディングの後。
+ */
+export type Chapter = 'ch1' | 'roofDay' | 'ch3' | 'end';
+export const CHAPTERS: readonly Chapter[] = ['ch1', 'roofDay', 'ch3', 'end'];
+
+/** 計画の種類（例：roof＝サエ家の屋根葺き、isukeRoof＝伊助家の屋根葺き）。 */
+export type PlanId = string;
 
 // ───────── 現在の状態（保存対象） ─────────
 
@@ -109,7 +120,9 @@ export interface StorySnapshot {
   readonly learned: readonly LearnedStage[];
   readonly npcs: readonly NpcStateSnapshot[];
   readonly promises: readonly PromiseRecord[];
-  readonly plan: PlanSnapshot;
+  readonly chapter: Chapter;
+  /** 計画 ID ごとの案・返事・決定。 */
+  readonly plans: Readonly<Record<PlanId, PlanSnapshot>>;
 }
 
 // ───────── 計画（Phase 3） ─────────
@@ -153,12 +166,16 @@ export interface PlanOptionDef {
   readonly detail?: string;
   /** 選べるようになる条件（未取得の情報を前提にした選択肢は出さない）。 */
   readonly when?: Condition;
+  /** 作業台には出さない（他の項目に合わせて自動で選ばれる値）。 */
+  readonly hidden?: boolean;
 }
 
 export interface PlanItemDef {
   readonly id: string;
   readonly label: string;
   readonly options: readonly PlanOptionDef[];
+  /** この項目を作業台に出すか（例：茅を借りるときだけ返し方を出す）。省略時は常に出す。 */
+  readonly visibleWhen?: (plan: PlanSpec) => boolean;
 }
 
 export interface PlanRule {
@@ -171,7 +188,12 @@ export interface PlanRule {
  * （過去の貸し借り・会話の回数・好感度は入力にしない）。
  */
 export interface PlanningDefs {
+  readonly id: PlanId;
+  /** 作業台の見出し（例：「サエ家の屋根葺きの段取り」）。 */
+  readonly title: string;
   readonly items: readonly PlanItemDef[];
+  /** 項目どうしの依存を整える（例：茅を借りないなら返し方は「なし」）。省略時はそのまま。 */
+  normalize?(plan: PlanSpec): PlanSpec;
   /** 案として成り立たない理由。成り立つときは null。 */
   invalidReason(plan: PlanSpec): string | null;
   /** その案に返事が必要な住民。 */

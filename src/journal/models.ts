@@ -52,6 +52,8 @@ export interface NotebookPerson {
 
 export interface NotebookPromise {
   readonly content: string;
+  /** 果たしたか（第3幕で、第1幕の約束を果たしたことになる）。 */
+  readonly kept: boolean;
   readonly from: string;
   readonly to: string;
   readonly source?: string;
@@ -141,6 +143,7 @@ export function buildNotebook(story: StoryState, src: JournalSources): NotebookM
 
   const promises = story.allPromises().map((p) => ({
     content: p.content,
+    kept: story.has(`kept:${p.id}`),
     from: src.households[p.from]?.name ?? p.from,
     to: src.households[p.to]?.name ?? p.to,
     ...(p.source ? { source: p.source } : {}),

@@ -2,8 +2,11 @@ import type {
   ConsentEntry,
   ConsentStatus,
   LearnedStage,
+  Chapter,
   NpcStateSnapshot,
   PlanDecision,
+  PlanId,
+  PlanningDefs,
   PlanResponse,
   PlanSnapshot,
   PlanSpec,
@@ -11,6 +14,7 @@ import type {
   StoryDefinitions,
   StorySnapshot,
 } from '../story/types';
+import { CHAPTERS } from '../story/types';
 
 /**
  * 保存データの形式と検証。DOM・Three.js に依存しない（ブラウザの保存領域は SaveStore が扱う）。
@@ -21,8 +25,12 @@ import type {
  * - 構造は正しいが、今の定義にない ID や順序の矛盾がある → その項目だけ除いて読み込み、警告を返す。
  */
 export const SAVE_FORMAT = 'yui-no-yakusoku-save';
-/** 版 2：計画（案・返事・決定）を追加。版 1 の記録は「計画なし」として読み込む。 */
-export const SAVE_VERSION = 2;
+/**
+ * 版 3：章と、章ごとの計画（第1幕・第3幕）。
+ * 版 2（Phase 3 の計画）：探索の記録は残し、計画とその結果は取り除いて第1幕に戻す（docs/PHASE4_DESIGN.md §10）。
+ * 版 1：計画なしとして読み込む。
+ */
+export const SAVE_VERSION = 3;
 
 export interface PlayerSnapshot {
   readonly x: number;
@@ -189,38 +197,91 @@ function parseStory(
     warnings.push('記録の順番を補正しました');
     clock = maxOrder;
   }
-  const plan = version >= 2 ? parsePlan(obj(s.plan, 'story.plan'), defs, warnings) : EMPTY_PLAN;
-  const planOrders = [...plan.responses.map((r) => r.order), plan.decision?.order ?? 0];
+  // 章と計画
+  let chapter: Chapter = 'ch1';
+  let plans: Record<PlanId, PlanSnapshot> = {};
+  let result = { flags, learned, npcs, promises };
+  if (version >= 3) {
+    const c = str(s.chapter, 'story.chapter');
+    if (!CHAPTERS.includes(c as Chapter)) throw new CorruptError(`章が不正です：${c}`);
+    chapter = c as Chapter;
+    const rawPlans = obj(s.plans, 'story.plans');
+    for (const [id, v] of Object.entries(rawPlans)) {
+      const planning = defs.plans?.[id];
+      if (!planning) {
+        warnings.push(`定義にない計画を読み飛ばしました：${id}`);
+        continue;
+      }
+      plans[id] = parsePlan(obj(v, `story.plans.${id}`), planning, defs, warnings);
+    }
+  } else if (version === 2) {
+    // 版2（Phase 3 の計画）：項目が足りず今の規則で検証できないため、計画と、その結果として入った状態を取り除く
+    const old = obj(s.plan, 'story.plan');
+    if (old.decision !== null && old.decision !== undefined) {
+      result = stripPhase3Outcome(result);
+      warnings.push('以前の版で決めた屋根葺きの計画は、新しい仕組みで立て直す必要があります（計画の前に戻しました）');
+    } else if (old.draft !== null || (Array.isArray(old.responses) && old.responses.length > 0)) {
+      warnings.push('以前の版の作業台の案と返事は、新しい仕組みに合わないため破棄しました');
+    }
+    plans = {};
+  }
+
+  // 章と決定の整合（決めていないのに先の章にいる、などは部分的に直せないので破損として扱う）
+  const roofDecided = !!plans.roof?.decision;
+  const isukeDecided = !!plans.isukeRoof?.decision;
+  const rank = CHAPTERS.indexOf(chapter);
+  if (rank >= CHAPTERS.indexOf('roofDay') && defs.plans?.roof && !roofDecided) throw new CorruptError('屋根葺きを決めないまま先の章に進んでいます');
+  if (roofDecided && rank < CHAPTERS.indexOf('roofDay')) throw new CorruptError('屋根葺きを決めたのに第1幕のままです');
+  if (isukeDecided !== (chapter === 'end') && defs.plans?.isukeRoof) throw new CorruptError('第3幕の決定と章が食い違っています');
+
+  const planOrders = Object.values(plans).flatMap((p) => [...p.responses.map((r) => r.order), p.decision?.order ?? 0]);
   if (Math.max(0, ...planOrders) > clock) {
     warnings.push('記録の順番を補正しました（計画）');
     clock = Math.max(0, ...planOrders);
   }
-  return { clock, flags, learned, npcs, promises, plan };
+  return { clock, ...result, chapter, plans };
 }
 
-const EMPTY_PLAN: PlanSnapshot = { draft: null, responses: [], decision: null };
+/** 版2 で決めた計画の結果として入った状態（屋根の葺き替え・約束・伊助の意向の変化・フラグ）を取り除く。 */
+function stripPhase3Outcome<T extends { flags: string[]; learned: LearnedStage[]; npcs: NpcStateSnapshot[]; promises: PromiseRecord[] }>(
+  r: T,
+): T {
+  return {
+    ...r,
+    flags: r.flags.filter((f) => f !== 'roofing:done'),
+    learned: r.learned.filter((l) => !(l.topic === 'sae.roof' && (l.stage === 'worse' || l.stage === 'renewed'))),
+    promises: r.promises.filter((p) => p.id !== 'saeHelpsIsukeHarvest'),
+    npcs: r.npcs.map((n) =>
+      n.id !== 'isuke'
+        ? n
+        : { ...n, consents: n.consents.filter((c) => !(c.request === 'roofPrep' || (c.request === 'roofDay' && c.status === 'agreed'))) },
+    ),
+  };
+}
 
 /**
  * 計画の検証。案・返事は今の定義と規則で検査し、合わないものは除いて警告する。
  * 決定の記録が規則と合わない（承諾していない人がいる等）ときは、結果の効果が状態に入っているため
  * 部分的に直せないので破損として扱う。
  */
-function parsePlan(o: Record<string, unknown>, defs: StoryDefinitions, warnings: string[]): PlanSnapshot {
-  const planning = defs.planning;
+function parsePlan(o: Record<string, unknown>, planning: PlanningDefs, defs: StoryDefinitions, warnings: string[]): PlanSnapshot {
   const specOf = (v: unknown, name: string): PlanSpec | null => {
     const raw = obj(v, name);
     const spec: Record<string, string> = {};
     for (const [k, val] of Object.entries(raw)) spec[k] = str(val, `${name}.${k}`);
-    if (!planning) return null;
-    const valid = planning.items.every((i) => i.options.some((opt) => opt.id === spec[i.id]));
-    return valid && Object.keys(spec).length === planning.items.length ? spec : null;
+    const valid =
+      Object.keys(spec).length === planning.items.length && planning.items.every((i) => i.options.some((opt) => opt.id === spec[i.id]));
+    if (!valid) return null;
+    // 依存関係が整っていない案は、今の規則では作れない
+    const normalized = planning.normalize ? planning.normalize(spec) : spec;
+    return planning.items.every((i) => normalized[i.id] === spec[i.id]) ? spec : null;
   };
-  const sig = (plan: PlanSpec) => (planning?.items ?? []).map((i) => `${i.id}=${plan[i.id]}`).join(';');
+  const sig = (plan: PlanSpec) => planning.items.map((i) => `${i.id}=${plan[i.id]}`).join(';');
 
   let draft: PlanSpec | null = null;
   if (o.draft !== null) {
     draft = specOf(o.draft, 'plan.draft');
-    if (!draft) warnings.push('今の定義にない計画の案を読み飛ばしました');
+    if (!draft) warnings.push(`今の定義にない計画の案を読み飛ばしました（${planning.id}）`);
   }
 
   const responses: PlanResponse[] = [];
@@ -234,9 +295,10 @@ function parsePlan(o: Record<string, unknown>, defs: StoryDefinitions, warnings:
     const plan = specOf(r.plan, 'plan');
     const source = optSource(r.source);
     // 返事は今の規則と一致するものだけ残す（規則が変わった古い記録は、相談し直してもらう）
-    const rule = plan && planning && defs.npcs.includes(npc) && planning.invalidReason(plan) === null && planning.involved(plan).includes(npc)
-      ? planning.respond(npc, plan)
-      : null;
+    const rule =
+      plan && defs.npcs.includes(npc) && planning.invalidReason(plan) === null && planning.involved(plan).includes(npc)
+        ? planning.respond(npc, plan)
+        : null;
     if (!plan || !rule || rule.status !== status || rule.reason !== reason) {
       warnings.push(`規則と合わない計画への返事を読み飛ばしました：${npc}`);
       continue;
@@ -250,7 +312,7 @@ function parsePlan(o: Record<string, unknown>, defs: StoryDefinitions, warnings:
     const plan = specOf(d.plan, 'decision.plan');
     const outcome = str(d.outcome, 'decision.outcome');
     const order = int(d.order, 'decision.order');
-    if (!plan || !planning || planning.outcome(plan) !== outcome) throw new CorruptError('決定した計画の記録が不正です');
+    if (!plan || planning.outcome(plan) !== outcome) throw new CorruptError('決定した計画の記録が不正です');
     const agreed = planning
       .involved(plan)
       .every((npc) => responses.some((r) => r.npc === npc && sig(r.plan) === sig(plan) && r.status === 'agreed'));

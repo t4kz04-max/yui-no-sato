@@ -3,8 +3,7 @@
  * - Phase 0：起動・移動・衝突・カメラ・ズーム・リサイズ・コンソールエラー
  * - Phase 1（[P1]）：案内表示、会話の開始・送り・選択・終了、会話中の操作制御、調査、状態による選択肢の変化
  * - Phase 2（[P2]）：手帳、結帳、ポーズ、会話の中断、記録（保存・続きから・壊れた記録・やり直し）
- * - Phase 3.5（[P3.5]）：各画面が 1280x720 と 1024x640 で画面内に収まり文字が十分な大きさか、見込み・承諾を得た案の比較・結果画面の構成、結果の後の住民の立ち位置
- * - Phase 3（[P3]）：作業台で案を作る・変える、住民との相談、見直し、決定、結果、結果の後の村、記録の復元
+ * - Phase 4（[P4]）：宗平・ミネを含む作業台（項目の出し分け）、相談と見直し、屋根葺き当日、三年後、第3幕（Q1〜Q3）、エンディング、史実と創作の解説、記録の復元、各画面の大きさ（1280x720・1024x640）
  *
  *   npm run test:browser
  *
@@ -486,50 +485,60 @@ await page.click('.notice-layer .menu-item[data-id="yes"]');
 const nw = await waitFor2((s) => !s.notice);
 check('[P2] 「最初からやり直す」で状態が初期化される', nw.mode === 'explore' && nw.learned.length === 0 && nw.objective === '広場にいるトキに話しかける');
 
-// ───────── Phase 3：作業台・相談・見直し・結果 ─────────
-// 情報集めの部分は Phase 1・2 の確認と単体テストで確かめているので、ここでは状態を直接用意する。
+// ───────── Phase 4：宗平・ミネを含む計画、屋根葺き当日、第3幕、エンディング ─────────
+// 情報集めの細部は Phase 1〜3 の確認と単体テストで確かめているので、ここでは状態を直接用意し、
+// 作業台・相談・見直し・決定・章の移り変わり・エンディングを実際の操作で確かめる。
 await page.evaluate(() => {
   const s = window.__yui.story;
-  s.markMet('sae');
-  s.markMet('isuke');
-  s.set('talked:sae');
-  s.set('talked:isuke');
-  s.learn('sae.schedule', 'needsHelp');
-  s.learn('isuke.availability', 'declined');
-  s.learn('isuke.field', 'harvesting');
-  s.learn('isuke.availability', 'harvest');
-  s.learn('isuke.field', 'progress');
-  s.learn('isuke.availability', 'dayBefore');
+  for (const n of ['sae', 'isuke', 'sohei', 'mine']) s.markMet(n);
+  for (const f of ['talked:sae', 'talked:isuke', 'talked:sohei', 'talked:mine']) s.set(f);
+  const learn = [
+    ['sae.schedule', 'needsHelp'], ['sae.kaya', 'short'], ['sae.roof', 'worn'],
+    ['isuke.availability', 'declined'], ['isuke.field', 'harvesting'], ['isuke.availability', 'harvest'],
+    ['isuke.field', 'progress'], ['isuke.availability', 'dayBefore'],
+    ['sohei.schedule', 'hasConflict'], ['sohei.schedule', 'kayaCutting'],
+    ['mine.kaya', 'reluctant'], ['mine.kaya', 'returnTerms'],
+  ];
+  for (const [t, st] of learn) s.learn(t, st);
+  s.setConsent('mine', 'showRecords', 'agreed');
+  s.learn('mine.kaya', 'whyRecord');
 });
-const p3 = () =>
+const p4 = () =>
   page.evaluate(() => {
     const g = window.__yui;
     const q = (s) => document.querySelector(s);
     const vis = (s) => { const e = q(s); return !!e && !e.hidden; };
+    const roof = (id) => g.world.roofs.get(id)?.materials[1]?.color.getHex() ?? null;
     return {
       mode: g.mode,
+      chapter: g.story.chapter,
       phase: g.story.planPhase(),
       outcome: g.story.outcome() ?? null,
       draft: g.story.planDraft(),
       plan: vis('.plan-layer'),
-      options: [...document.querySelectorAll('.plan-item')].map((i) => ({
-        item: i.dataset.item,
-        options: [...i.querySelectorAll('.plan-option')].map((b) => b.dataset.option),
-        selected: i.querySelector('.plan-option.is-selected')?.dataset.option ?? null,
-      })),
+      items: [...document.querySelectorAll('.plan-item')].map((i) => i.dataset.item),
+      options: Object.fromEntries([...document.querySelectorAll('.plan-item')].map((i) => [i.dataset.item, [...i.querySelectorAll('.plan-option')].map((b) => b.dataset.option)])),
       responses: [...document.querySelectorAll('.plan-response')].map((r) => `${r.dataset.npc}:${r.querySelector('.plan-response-chip')?.textContent}`),
       decideDisabled: q('.plan-decide')?.disabled ?? null,
       result: vis('.result-layer'),
-      resultTitle: q('.result-title')?.textContent ?? '',
+      resultTitle: q('.result-layer .result-title')?.textContent ?? '',
+      ending: vis('.ending-layer'),
+      endingText: q('.ending-layer .result-body')?.textContent ?? '',
+      explain: vis('.explain-layer'),
+      explainText: q('.explain-layer .result-body')?.textContent ?? '',
       notice: vis('.notice-layer'),
+      noticeTitle: q('.notice-layer .menu-title')?.textContent ?? '',
       objective: q('.hud-objective-text')?.textContent ?? '',
-      roofColor: g.world.saeThatch?.[1]?.color.getHex() ?? null,
+      villagers: g.villagers.visible,
+      saeRoof: roof('sae'),
+      isukeRoof: roof('isuke'),
+      where: Object.fromEntries(g.interaction.interactables.filter((i) => i.kind === 'npc').map((i) => [i.id, [i.position.x, i.position.z]])),
     };
   });
-const waitP3 = async (cond, timeoutMs = 8000) => {
+const waitP4 = async (cond, timeoutMs = 8000) => {
   const t0 = Date.now();
-  let s = await p3();
-  while (!cond(s) && Date.now() - t0 < timeoutMs) { await wait(100); s = await p3(); }
+  let s = await p4();
+  while (!cond(s) && Date.now() - t0 < timeoutMs) { await wait(100); s = await p4(); }
   return s;
 };
 /**
@@ -549,109 +558,25 @@ const talkTo = async (id, x, z, heading, pick) => {
   await press('KeyE', (u) => u.dialogueVisible);
   return finishDialogue(pick);
 };
+const SPOT = {
+  sae: [3.4, 12.4, Math.PI],
+  isuke: [33.5, 8.1, Math.PI],
+  sohei: [-2.5, -21.6, Math.PI],
+  mine: [-15.2, -8.4, Math.PI],
+};
+const consult = (id) => talkTo(id, ...SPOT[id], pickText('作業台でまとめた案', 'この'));
 const openPlan = async () => {
   await place(4.5, -18.6, Math.PI);
   await waitFor((u) => u.target === 'planTable');
   await press('KeyE', (u) => u.dialogueVisible);
   await finishDialogue();
-  return waitP3((s) => s.plan);
+  return waitP4((s) => s.plan);
 };
-const roofBefore = (await p3()).roofColor;
-
-const q1 = await openPlan();
-check('[P3] 作業台を調べると段取りの画面が開き、サエの元の案が広げてある', q1.mode === 'plan' && q1.plan && q1.draft?.date === 'keep' && q1.draft?.isuke === 'dayOf', JSON.stringify(q1.draft));
-check('[P3] 知っている情報に応じて案の選択肢が出ている', JSON.stringify(q1.options.map((o) => o.options)) === JSON.stringify([['keep', 'afterHarvest'], ['none', 'dayOf', 'dayBefore'], ['none', 'harvestHelp']]), JSON.stringify(q1.options.map((o) => o.options)));
-check('[P3] 関係する人の返事は「まだ相談していない」で、決定できない', q1.responses.length === 2 && q1.responses.every((r) => /まだ相談していない/.test(r)) && q1.decideDisabled === true, q1.responses.join(' / '));
-await page.click('.plan-item[data-item="isuke"] .plan-option[data-option="dayBefore"]');
-const q2 = await waitP3((s) => s.draft?.isuke === 'dayBefore');
-check('[P3] クリックで案を変えられる', q2.options.find((o) => o.item === 'isuke')?.selected === 'dayBefore');
-await page.screenshot({ path: `${OUT}/shot-30-plan.png` });
-await page.keyboard.press('Escape');
-await waitP3((s) => !s.plan);
-
-// 伊助に相談 → 条件付き
-await talkTo('isuke', 33.5, 8.1, Math.PI, pickText('作業台でまとめた案', 'この案で手伝って'));
-const q3 = await p3();
-check('[P3] 伊助と話して相談すると返事が記録され、見直しを促される', q3.phase === 'revise' && /見直す/.test(q3.objective), `${q3.phase} / ${q3.objective}`);
-
-// 見直し：刈り入れの手伝いを申し出る
-const q4 = await openPlan();
-check('[P3] 作業台に伊助の「条件付き」の返事が出る', q4.responses.some((r) => r.startsWith('isuke:') && /条件付き/.test(r)), q4.responses.join(' / '));
-await page.click('.plan-item[data-item="offer"] .plan-option[data-option="harvestHelp"]');
-const q5 = await waitP3((s) => s.draft?.offer === 'harvestHelp');
-check('[P3] 案を変えると、返事は「まだ相談していない」に戻る', q5.phase === 'pending' && q5.responses.every((r) => /まだ相談していない/.test(r)), q5.responses.join(' / '));
-await page.keyboard.press('Escape');
-await waitP3((s) => !s.plan);
-await talkTo('isuke', 33.5, 8.1, Math.PI, pickText('作業台でまとめた案', 'この案で手伝って'));
-await talkTo('sae', 3.4, 12.4, Math.PI, pickText('作業台でまとめた案', 'この案でいいですか'));
-const q6 = await p3();
-check('[P3] サエと伊助が承諾すると、計画を決められる状態になる', q6.phase === 'ready' && /決める/.test(q6.objective), `${q6.phase} / ${q6.objective}`);
-
-// 決定 → 確認 → 結果
-const q7 = await openPlan();
-check('[P3] 全員が承諾した案では「この案で決める」が押せる', q7.decideDisabled === false);
-const agreedCards = await page.evaluate(() => document.querySelectorAll('.plan-agreed-card').length);
-check('[P3.5] 承諾を得た案が一覧に並び、見込みで見比べられる', agreedCards >= 1, `${agreedCards} 件`);
-await page.click('.plan-decide');
-await waitP3((s) => s.notice);
-await page.screenshot({ path: `${OUT}/shot-31-confirm.png` });
-await page.click('.notice-layer .menu-item[data-id="yes"]');
-const q8 = await waitP3((s) => s.result);
-check('[P3] 決めると結果画面が出る（前日準備の分担）', q8.result && q8.outcome === 'r2' && /前日の準備を分け合って/.test(q8.resultTitle), q8.resultTitle);
-await page.screenshot({ path: `${OUT}/shot-32-result.png` });
-const rsec = await page.evaluate(() => ({
-  decided: document.querySelector('.result-block.is-decided')?.textContent ?? '',
-  achieved: document.querySelectorAll('.result-block.is-achieved li').length,
-  costs: [...document.querySelectorAll('.result-block.is-costs li')].map((li) => li.textContent).join(' / '),
-}));
-check('[P3.5] 結果画面は「決めたこと」「実現したこと」「残ったこと」に分かれている', /前日の準備を頼む/.test(rsec.decided) && rsec.achieved > 0 && /約束/.test(rsec.costs), rsec.costs);
-const rlay = await page.evaluate(() => { const e = document.querySelector('.result').getBoundingClientRect(); const t = document.querySelector('.result-block li'); return { inView: e.top >= 0 && e.bottom <= innerHeight + 0.5 && e.left >= 0 && e.right <= innerWidth + 0.5, font: parseFloat(getComputedStyle(t).fontSize) }; });
-check('[P3.5] 結果画面は画面に収まり、本文は16px以上', rlay.inView && rlay.font >= 16, JSON.stringify(rlay));
-await page.keyboard.press('Enter');
-const q9 = await waitP3((s) => !s.result);
-check('[P3] 結果を閉じると村に戻り、屋根の見た目が葺き替え後に変わる', q9.mode === 'explore' && q9.roofColor !== roofBefore && q9.roofColor === 0xb39a64, `${roofBefore?.toString(16)} → ${q9.roofColor?.toString(16)}`);
-await page.evaluate(() => { const g = window.__yui; g.player.x = 0; g.player.z = 22; const o = g.cameraRig.orbit; o.yaw = o.targetYaw = Math.PI; o.pitch = o.targetPitch = 0.35; o.distance = o.targetDistance = 18; });
-await wait(1200);
-await page.screenshot({ path: `${OUT}/shot-33-roof-renewed.png` });
-
-// 結果の後の村
-const e1 = await talkTo('isuke', 33.5, 8.1, Math.PI);
-check('[P3] 結果の後は伊助の台詞が変わる', !e1.active);
-const e1text = await page.evaluate(() => window.__yui.story.outcome());
-check('[P3] 結果は状態として残る', e1text === 'r2');
-await place(5.8, 12.0, Math.PI);
-await waitFor((u) => u.target === 'ledger');
-await press('KeyE', (u) => u.dialogueVisible);
-await finishDialogue();
-const lg = await waitFor2((s) => s.ledger);
-check('[P3] 結帳に今年の記録と新しい約束が書き加えられる', /今年の秋/.test(lg.ledgerText) && /前日の半日/.test(lg.ledgerText) && /刈り入れに人手を出す/.test(lg.ledgerText));
-await page.screenshot({ path: `${OUT}/shot-34-ledger-after.png` });
-await press2('Escape', (s) => !s.ledger);
-const q10 = await openPlan();
-check('[P3] 決定後の作業台は閲覧のみ（案を変えられない）', q10.plan && q10.decideDisabled !== false && (await page.evaluate(() => document.querySelectorAll('.plan-option:not(:disabled)').length)) === 3);
-await page.click('.plan-item[data-item="date"] .plan-option[data-option="afterHarvest"]').catch(() => {});
-const q11 = await p3();
-check('[P3] 決定後にクリックしても案は変わらない', q11.draft?.date === 'keep' && q11.outcome === 'r2');
-await page.keyboard.press('Escape');
-await waitP3((s) => !s.plan);
-
-// 記録 → 再読み込み → 続きから で、計画と結果が戻る
-await page.keyboard.press('Escape');
-await waitFor2((s) => s.pause);
-await page.click('.pause-layer .menu-item[data-id="save"]');
-await waitFor2((s) => /記録しました/.test(s.pauseStatus));
-await press2('Escape', (s) => !s.pause);
-await page.reload({ waitUntil: 'networkidle0' });
-await wait(2500);
-await waitFor2((s) => s.notice);
-await page.click('.notice-layer .menu-item[data-id="continue"]');
-const r3 = await waitP3((s) => !s.notice);
-const promises = await page.evaluate(() => window.__yui.story.allPromises().map((p) => p.id));
-check('[P3] 再読み込み後も、決めた計画・結果・約束・屋根の見た目が戻る',
-  r3.outcome === 'r2' && r3.phase === 'decided' && promises.includes('saeHelpsIsukeHarvest') && r3.roofColor === 0xb39a64,
-  `${r3.outcome} / ${promises.join(',')} / ${r3.roofColor?.toString(16)}`);
-
-// ───────── Phase 3.5：読みやすさ（画面に収まる・文字の大きさ）と結果の村の様子 ─────────
+const clickOption = async (item, option) => {
+  await page.click(`.plan-item[data-item="${item}"] .plan-option[data-option="${option}"]`);
+  return waitP4((s) => s.draft?.[item] === option);
+};
+const closePlan = async () => { await page.keyboard.press('Escape'); await waitP4((s) => !s.plan); };
 /** パネルが画面内に収まり、本文が指定の大きさ以上か。中身が多いときは中だけがスクロールできるか。 */
 const layout = (panelSel, textSel, bodySel) =>
   page.evaluate((p, t, b) => {
@@ -669,73 +594,154 @@ const layout = (panelSel, textSel, bodySel) =>
     };
   }, panelSel, textSel, bodySel ?? null);
 const fits = (l, minFont) => !!l && l.inView && l.font >= minFont && l.scrollOk;
+const roofBefore = (await p4()).saeRoof;
 
-// 結果の後（R2）は、サエが伊助の畑に出ている
-const where = await page.evaluate(() => {
-  const g = window.__yui;
-  const sae = g.interaction.interactables.find((i) => i.id === 'sae');
-  return { x: sae.position.x, z: sae.position.z, viewX: g.npcViews.get('sae').root.position.x };
-});
-check('[P3.5] R2 の後、サエは伊助の畑で刈り入れを手伝っている（立ち位置と見た目が移る）', Math.abs(where.x - 37) < 0.01 && Math.abs(where.viewX - 37) < 0.01, JSON.stringify(where));
-await page.evaluate(() => { const g = window.__yui; g.player.x = 34; g.player.z = 14; const o = g.cameraRig.orbit; o.yaw = o.targetYaw = Math.PI; o.pitch = o.targetPitch = 0.3; o.distance = o.targetDistance = 9; });
+// ── 作業台：項目は案に応じて出し分ける ──
+const q4a1 = await openPlan();
+check('[P4] 作業台に、茅とミネへの返し方の項目が出る（宗平の別件は延ばすときだけ）',
+  JSON.stringify(q4a1.items) === JSON.stringify(['date', 'isuke', 'offer', 'kaya', 'kayaReturn']), JSON.stringify(q4a1.items));
+check('[P4] 知っている情報に応じて、茅（手持ち）・返し方（茅で返す・記す）が選べる',
+  JSON.stringify(q4a1.options.kaya) === JSON.stringify(['mine', 'own']) && JSON.stringify(q4a1.options.kayaReturn) === JSON.stringify(['labor', 'nextYear', 'nextYearRecorded']),
+  JSON.stringify(q4a1.options));
+check('[P4] 最初の案は、サエ・宗平・伊助・ミネの4人に相談が要る', q4a1.responses.length === 4 && q4a1.responses.every((r) => /まだ相談していない/.test(r)), q4a1.responses.join(' / '));
+const q4a2 = await clickOption('date', 'afterHarvest');
+check('[P4] 日取りを延ばすと「宗平の別件」の項目が出る', q4a2.items.includes('soheiCover') && q4a2.options.soheiCover?.includes('mineCovers'), JSON.stringify(q4a2.items));
+await clickOption('date', 'keep');
+const q4a3 = await clickOption('kaya', 'own');
+check('[P4] 手持ちの茅にすると返し方の項目が消え、ミネへの相談も不要になる', !q4a3.items.includes('kayaReturn') && !q4a3.responses.some((r) => r.startsWith('mine:')), `${JSON.stringify(q4a3.items)} / ${q4a3.responses.join(' / ')}`);
+await clickOption('kaya', 'mine');
+await page.screenshot({ path: `${OUT}/shot-50-plan-p4.png` });
+await closePlan();
+
+// ── ミネに相談 → 条件付き（要るのは茅）→ 見直し ──
+await consult('mine');
+const q4a4 = await p4();
+check('[P4] ミネに「手伝いで返す」案を相談すると条件付きで、見直しを促される', q4a4.phase === 'revise' && /見直す/.test(q4a4.objective), `${q4a4.phase} / ${q4a4.objective}`);
+await openPlan();
+await clickOption('isuke', 'dayBefore');
+await clickOption('offer', 'harvestHelp');
+const q4a5 = await clickOption('kayaReturn', 'nextYearRecorded');
+check('[P4] 案を変えると、関係する4人にもう一度相談が要る', q4a5.phase === 'pending' && q4a5.responses.length === 4, q4a5.responses.join(' / '));
+await closePlan();
+for (const id of ['isuke', 'sae', 'sohei', 'mine']) await consult(id);
+const q4a6 = await openPlan();
+check('[P4] 4人が承諾すると決められ、承諾を得た案に並ぶ', q4a6.phase === 'ready' && q4a6.decideDisabled === false && q4a6.responses.every((r) => /承諾/.test(r)), q4a6.responses.join(' / '));
+
+// ── 決定 → 屋根葺き当日 ──
+await page.click('.plan-decide');
+await waitP4((s) => s.notice);
+await page.click('.notice-layer .menu-item[data-id="yes"]');
+const q4d1 = await waitP4((s) => s.notice && /屋根葺きの日/.test(s.noticeTitle));
+check('[P4] 決めると「屋根葺きの日」に移る', q4d1.chapter === 'roofDay' && /屋根葺きの日/.test(q4d1.noticeTitle), q4d1.noticeTitle);
+await page.click('.notice-layer .menu-item[data-id="ok"]');
+const q4d2 = await waitP4((s) => !s.notice);
+check('[P4] 当日は村の人たちが手伝いに来て、宗平とミネがサエ家の前にいる',
+  q4d2.villagers && Math.abs(q4d2.where.sohei[0] + 4.8) < 0.01 && Math.abs(q4d2.where.mine[0] - 8.2) < 0.01, JSON.stringify(q4d2.where));
+await page.evaluate(() => { const g = window.__yui; g.player.x = 0; g.player.z = 22; const o = g.cameraRig.orbit; o.yaw = o.targetYaw = Math.PI; o.pitch = o.targetPitch = 0.35; o.distance = o.targetDistance = 16; });
 await wait(1200);
-await page.screenshot({ path: `${OUT}/shot-40-sae-at-field.png` });
+await page.screenshot({ path: `${OUT}/shot-51-roofday.png` });
+await talkTo('sohei', -4.8, 12.4, Math.PI);
+const q4day = await page.evaluate(() => window.__yui.story.flagList());
+check('[P4] 当日の住民と話せる（宗平：段取り）', q4day.includes('talked:sohei'));
+await talkTo('sae', 3.4, 12.4, Math.PI, pickText('一日を終える'));
+const q4d3 = await waitP4((s) => s.result);
+check('[P4] サエと話して一日を終えると、結果画面が出る（前日の準備を分け合って）', q4d3.result && /前日の準備を分け合って/.test(q4d3.resultTitle), q4d3.resultTitle);
+const q4rl = await layout('.result-layer .result', '.result-layer .result-block li', '.result-layer .result-body');
+check('[P4] 結果画面は画面に収まり、本文は16px以上', fits(q4rl, 16), JSON.stringify(q4rl));
+await page.screenshot({ path: `${OUT}/shot-52-result-p4.png` });
+await page.keyboard.press('Enter');
+const q4d4 = await waitP4((s) => s.notice && /三年後/.test(s.noticeTitle));
+check('[P4] 結果の後、「それから三年後の秋」に移り、三年のあいだのことが示される', /三年後/.test(q4d4.noticeTitle), q4d4.noticeTitle);
+await page.screenshot({ path: `${OUT}/shot-53-three-years.png` });
+await page.click('.notice-layer .menu-item[data-id="ok"]');
+const q4c1 = await waitP4((s) => !s.notice && s.chapter === 'ch3');
+check('[P4] 第3幕：サエ家の屋根は葺き替え後、伊助家の屋根は傷んだ見た目になる', q4c1.saeRoof !== roofBefore && q4c1.isukeRoof !== null && q4c1.isukeRoof !== q4c1.saeRoof, `${q4c1.saeRoof?.toString(16)} / ${q4c1.isukeRoof?.toString(16)}`);
 
+// ── 第3幕 ──
+await talkTo('isuke', ...SPOT.isuke);
+const q4c2 = await openPlan();
+check('[P4] 第3幕の作業台：伊助家の屋根葺き。サエの足のことを知らないと「下の仕事」は出ない',
+  JSON.stringify(q4c2.options.saeHelp) === JSON.stringify(['roofTop', 'none']), JSON.stringify(q4c2.options));
+await closePlan();
+await consult('sae');
+const q4c3 = await p4();
+check('[P4] 記録どおり「屋根の上」を頼むと、サエは断る（記録を理由に強制できない）', q4c3.phase === 'revise', q4c3.phase);
+const q4c4 = await openPlan();
+check('[P4] サエの返事で足のことが分かり、「下の仕事」が選べるようになる', q4c4.options.saeHelp?.includes('ground'), JSON.stringify(q4c4.options.saeHelp));
+await clickOption('saeHelp', 'ground');
+await closePlan();
+await consult('sae');
+await consult('isuke');
+await openPlan();
+await page.click('.plan-decide');
+await waitP4((s) => s.notice);
+await page.click('.notice-layer .menu-item[data-id="yes"]');
+const q4e1 = await waitP4((s) => s.ending);
+check('[P4] 役割を相談し直して決めると、エンディング E1「つながる約束」', q4e1.ending && /E1/.test(q4e1.endingText) && /つながる約束/.test(q4e1.endingText) && q4e1.chapter === 'end', q4e1.endingText.slice(0, 80));
+check('[P4] エンディングで、第1幕・第3幕の選択と結帳に残ったことを振り返れる', /第1幕/.test(q4e1.endingText) && /第3幕/.test(q4e1.endingText) && /返し 済/.test(q4e1.endingText));
+const q4el = await layout('.ending-layer .result', '.ending-layer .result-block li', '.ending-layer .result-body');
+check('[P4] エンディング画面は画面に収まる', fits(q4el, 16), JSON.stringify(q4el));
+await page.screenshot({ path: `${OUT}/shot-54-ending.png` });
+await page.click('.ending-layer .plan-pick');
+const q4x1 = await waitP4((s) => s.explain);
+check('[P4] エンディングから「史実と創作について」を開ける', q4x1.explain && /合力/.test(q4x1.explainText) && /ゲーム用の創作/.test(q4x1.explainText) && /出典は確認中/.test(q4x1.explainText));
+await page.screenshot({ path: `${OUT}/shot-55-explain.png` });
+await page.keyboard.press('Escape');
+const q4x2 = await waitP4((s) => !s.explain);
+check('[P4] 閉じると村に戻り、物語の終わりが目的に出る', q4x2.mode === 'explore' && /物語はここまで/.test(q4x2.objective) && q4x2.isukeRoof === q4x2.saeRoof, q4x2.objective);
+
+// ── 記録 → 再読み込み → 続きから ──
+await page.keyboard.press('Escape');
+await waitFor2((s) => s.pause);
+await page.click('.pause-layer .menu-item[data-id="save"]');
+await waitFor2((s) => /記録しました/.test(s.pauseStatus));
+await press2('Escape', (s) => !s.pause);
+await page.reload({ waitUntil: 'networkidle0' });
+await wait(2500);
+await waitFor2((s) => s.notice);
+await page.click('.notice-layer .menu-item[data-id="continue"]');
+const q4r4 = await waitP4((s) => !s.notice);
+check('[P4] 再読み込み後も、章・両方の計画・結末・屋根の見た目が戻る', q4r4.chapter === 'end' && q4r4.outcome === 'e1' && q4r4.isukeRoof === q4r4.saeRoof, `${q4r4.chapter} / ${q4r4.outcome}`);
+
+// ── 読みやすさ（Phase 3.5 の改善を維持） ──
 for (const [w, h] of [[1280, 720], [1024, 640]]) {
   await page.setViewport({ width: w, height: h });
   await wait(800);
-  const tag = `${w}x${h}`;
-
-  // 会話（サエ：結果の後の台詞）
-  await place(37.0, 12.6, Math.PI);
+  const q4tag = `${w}x${h}`;
+  await place(...SPOT.sae);
   await waitFor((u) => u.target === 'sae');
   await press('KeyE', (u) => u.dialogueVisible);
   await page.keyboard.press('Space');
   await wait(600);
-  const dl = await layout('.dialogue-box', '.dialogue-text', '.dialogue-text');
-  check(`[P3.5] ${tag} 会話：画面に収まり、本文は19px以上`, fits(dl, 19), JSON.stringify(dl));
-  const em = await page.evaluate(() => document.querySelectorAll('.dialogue-text .dialogue-em').length);
-  check(`[P3.5] ${tag} 会話の要点が強調表示される`, em > 0, `強調 ${em} 箇所`);
-  if (w === 1280) await page.screenshot({ path: `${OUT}/shot-41-dialogue-large.png` });
+  const q4dl = await layout('.dialogue-box', '.dialogue-text', '.dialogue-text');
+  check(`[P4] ${q4tag} 会話：画面に収まり、本文は19px以上`, fits(q4dl, 19), JSON.stringify(q4dl));
   await finishDialogue();
-
-  // 手帳
   await press2('Tab', (s) => s.notebook);
-  await press2('Digit2', (s) => s.activeTab === 'known');
-  const nb = await layout('.notebook', '.notebook-item-summary', '.notebook-body');
-  check(`[P3.5] ${tag} 手帳：画面に収まり、要点は18px以上、長い内容は中でスクロールする`, fits(nb, 18), JSON.stringify(nb));
-  if (w === 1280) await page.screenshot({ path: `${OUT}/shot-42-notebook-large.png` });
+  const q4nb = await layout('.notebook', '.notebook-item-summary', '.notebook-body');
+  check(`[P4] ${q4tag} 手帳：画面に収まり、要点は18px以上`, fits(q4nb, 18), JSON.stringify(q4nb));
   await press2('Tab', (s) => !s.notebook);
-
-  // 結帳
   await place(5.8, 12.0, Math.PI);
   await waitFor((u) => u.target === 'ledger');
   await press('KeyE', (u) => u.dialogueVisible);
   await finishDialogue();
-  await waitFor2((s) => s.ledger);
-  const lg2 = await layout('.ledger', '.ledger-item-line', '.ledger-body');
-  check(`[P3.5] ${tag} 結帳：画面に収まり、本文は16px以上`, fits(lg2, 16), JSON.stringify(lg2));
+  const q4lg3 = await waitFor2((s) => s.ledger);
+  const q4ll = await layout('.ledger', '.ledger-item-line', '.ledger-body');
+  check(`[P4] ${q4tag} 結帳：画面に収まり、今年と三年後の記録が書き加わっている`, fits(q4ll, 16) && /今年の秋/.test(q4lg3.ledgerText) && /三年後の秋/.test(q4lg3.ledgerText), JSON.stringify(q4ll));
+  if (w === 1280) await page.screenshot({ path: `${OUT}/shot-56-ledger-end.png` });
   await press2('Escape', (s) => !s.ledger);
-
-  // 作業台（決定後の閲覧）
   await openPlan();
-  const pl = await layout('.plan', '.plan-option', '.plan-body');
-  check(`[P3.5] ${tag} 作業台：画面に収まり、選択肢は16px以上`, fits(pl, 16), JSON.stringify(pl));
-  const fc = await page.evaluate(() => document.querySelectorAll('.plan-forecast .forecast dt').length);
-  check(`[P3.5] ${tag} 作業台に「この案で起きること（見込み）」が4つの観点で出る`, fc === 4, `${fc}`);
-  if (w === 1280) await page.screenshot({ path: `${OUT}/shot-43-plan-decided.png` });
-  await page.keyboard.press('Escape');
-  await waitP3((s) => !s.plan);
-
-  // ポーズ
+  const q4pl = await layout('.plan', '.plan-option', '.plan-body');
+  check(`[P4] ${q4tag} 作業台：画面に収まり、選択肢は16px以上`, fits(q4pl, 16), JSON.stringify(q4pl));
+  await closePlan();
   await press2('Escape', (s) => s.pause);
-  const pm = await layout('.pause-layer .menu-panel', '.pause-layer .menu-item');
-  check(`[P3.5] ${tag} ポーズ：画面に収まり、項目は17px以上`, fits(pm, 17), JSON.stringify(pm));
-  await press2('Escape', (s) => !s.pause);
-
-  // 目的表示
-  const ob = await layout('.hud-objective', '.hud-objective-text');
-  check(`[P3.5] ${tag} 目的表示：画面に収まり、17px以上`, fits(ob, 17), JSON.stringify(ob));
+  const q4pm = await layout('.pause-layer .menu-panel', '.pause-layer .menu-item');
+  check(`[P4] ${q4tag} ポーズ：画面に収まり、「史実と創作について」がある`, fits(q4pm, 17) && (await page.evaluate(() => !!document.querySelector('.pause-layer .menu-item[data-id="explain"]'))), JSON.stringify(q4pm));
+  await page.click('.pause-layer .menu-item[data-id="explain"]');
+  await waitP4((s) => s.explain);
+  const q4xl = await layout('.explain-layer .result', '.explain-layer .result-block li', '.explain-layer .result-body');
+  check(`[P4] ${q4tag} 史実と創作の解説：画面に収まる`, fits(q4xl, 16), JSON.stringify(q4xl));
+  await page.keyboard.press('Escape');
+  await waitP4((s) => !s.explain);
 }
 await page.setViewport({ width: 1280, height: 720 });
 await wait(600);
