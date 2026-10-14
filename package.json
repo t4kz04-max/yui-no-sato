@@ -1,0 +1,27 @@
+{
+  "name": "yui-no-yakusoku",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "結の約束（仮）— 白川郷の「結」を題材にしたブラウザ向け短編3D探索アドベンチャー",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test:browser": "node scripts/browser-check.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "tsc --noEmit && vitest run && vite build"
+  },
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.186.0",
+    "puppeteer-core": "^25.13.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.4"
+  }
+}

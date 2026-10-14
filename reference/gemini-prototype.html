@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>白川郷 3D RPG ビジュアルプロトタイプ</title>
+    <!-- Tailwind CSS for UI overlays -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+            background-color: #1a1a1a;
+            user-select: none;
+        }
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        .glass-panel {
+            background: rgba(20, 24, 33, 0.75);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+    </style>
+</head>
+<body class="relative w-full h-full">
+
+    <!-- UI Overlay -->
+    <div id="ui-container" class="absolute inset-0 pointer-events-none flex flex-col justify-between p-6 z-10">
+        <!-- Top Header -->
+        <div class="flex justify-between items-start">
+            <div class="glass-panel text-white px-5 py-3 rounded-2xl shadow-2xl pointer-events-auto">
+                <h1 class="text-xl font-bold tracking-wider text-amber-100 flex items-center gap-2">
+                    <span class="inline-block w-3 h-3 rounded-full bg-amber-500 animate-pulse"></span>
+                    白川郷 - 結の里 (Shirakawa-go Visual Prototype)
+                </h1>
+                <p class="text-xs text-stone-300 mt-1">3D RPG Environment & Architectural Exploration</p>
+            </div>
+            <div class="glass-panel text-stone-200 px-4 py-3 rounded-2xl shadow-2xl text-xs space-y-1 pointer-events-auto">
+                <div class="font-semibold text-amber-200 mb-1 border-b border-stone-700 pb-1">操作方法</div>
+                <div><kbd class="bg-stone-800 px-1.5 py-0.5 rounded text-amber-300">W A S D</kbd> 移動 / <kbd class="bg-stone-800 px-1.5 py-0.5 rounded text-amber-300">Shift</kbd> 走る</div>
+                <div><kbd class="bg-stone-800 px-1.5 py-0.5 rounded text-amber-300">Space</kbd> ジャンプ</div>
+                <div><kbd class="bg-stone-800 px-1.5 py-0.5 rounded text-amber-300">マウスドラッグ</kbd> 視点回転</div>
+                <div><kbd class="bg-stone-800 px-1.5 py-0.5 rounded text-amber-300">ホイール</kbd> カメラ距離</div>
+            </div>
+        </div>
+
+        <!-- Bottom Footer info / Loading -->
+        <div class="flex justify-between items-end">
+            <div class="glass-panel text-stone-300 px-4 py-2 rounded-xl text-xs">
+                FPS: <span id="fps-counter" class="text-amber-400 font-mono font-bold">60</span> | 雰囲気モード: 午後の木漏れ日
+            </div>
+            <div id="loading-screen" class="glass-panel text-amber-200 px-6 py-3 rounded-2xl text-sm font-medium animate-pulse">
+                木綿・茅葺き・自然環境の生成中...
+            </div>
+        </div>
+    </div>
+
+    <!-- 3D Canvas Container -->
+    <div id="canvas-container"></div>
+
+    <script>
+        let scene, camera, renderer;
+        let player, playerBody, playerAnimTime = 0;
+        let villagers = [];
+        const colliders = []; // 当たり判定用オブジェクト
+
+        // 入力管理
+        const keys = { w: false, a: false, s: false, d: false, shift: false, space: false };
+        let mouseX = 0, mouseY = 0, cameraAngleX = 0, cameraAngleY = 0.5, cameraDistance = 12;
+        let isMouseDown = false, prevMouseX = 0, prevMouseY = 0;
+
+        // 物理・移動用パラメータ
+        const playerVelocity = new THREE.Vector3();
+        const playerSpeed = 0.08;
+        const playerRunMultiplier = 1.8;
+        let isGrounded = true;
+        const gravity = 0.015;
+
+        // FPS測定用
+        let frameCount = 0, lastTime = performance.now(), fps = 60;
+
+        init();
+        animate();
+
+        function init() {
+            // シーン設定
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xdbe7f0); // 遠景の軽い霞・空の色
+            scene.fog = new THREE.FogExp2(0xdbe7f0, 0.018);
+
+            // カメラ設定
+            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+            // レンダラー設定 (美しい影とトーンマッピング)
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.1;
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            // ライティング（午後の柔らかい日差し）
+            const ambientLight = new THREE.AmbientLight(0xfff5e6, 0.6);
+            scene.add(ambientLight);
+
+            const hemiLight = new THREE.HemisphereLight(0xddeeff, 0x554433, 0.5);
+            hemiLight.position.set(0, 50, 0);
+            scene.add(hemiLight);
+
+            const dirLight = new THREE.DirectionalLight(0xfffaed, 1.2);
+            dirLight.position.set(40, 60, 30);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            dirLight.shadow.camera.near = 0.5;
+            dirLight.shadow.camera.far = 150;
+            const d = 40;
+            dirLight.shadow.camera.left = -d;
+            dirLight.shadow.camera.right = d;
+            dirLight.shadow.camera.top = d;
+            dirLight.shadow.camera.bottom = -d;
+            dirLight.shadow.bias = -0.0005;
+            scene.add(dirLight);
+
+            // 地形・道の作成
+            createTerrain();
+
+            // 集落（合掌造りの家々）の作成
+            createVillage();
+
+            // 周囲の自然環境（木々、石垣、柵、稲田風の環境）
+            createEnvironment();
+
+            // プレイヤーキャラクターの作成
+            createPlayer();
+
+            // イベントリスナー登録
+            window.addEventListener('resize', onWindowResize);
+            window.addEventListener('keydown', (e) => handleKey(e, true));
+            window.addEventListener('keyup', (e) => handleKey(e, false));
+            
+            const canvasEl = renderer.domElement;
+            canvasEl.addEventListener('mousedown', (e) => {
+                isMouseDown = true;
+                prevMouseX = e.clientX;
+                prevMouseY = e.clientY;
+            });
+            window.addEventListener('mouseup', () => { isMouseDown = false; });
+            window.addEventListener('mousemove', (e) => {
+                if (!isMouseDown) return;
+                const deltaX = e.clientX - prevMouseX;
+                const deltaY = e.clientY - prevMouseY;
+                cameraAngleX -= deltaX * 0.005;
+                cameraAngleY = Math.max(0.1, Math.min(1.4, cameraAngleY - deltaY * 0.005));
+                prevMouseX = e.clientX;
+                prevMouseY = e.clientY;
+            });
+            canvasEl.addEventListener('wheel', (e) => {
+                cameraDistance = Math.max(5, Math.min(25, cameraDistance + e.deltaY * 0.01));
+            });
+
+            // ローディング非表示
+            setTimeout(() => {
+                const loader = document.getElementById('loading-screen');
+                if (loader) loader.style.display = 'none';
+            }, 800);
+        }
+
+        function createTerrain() {
+            // 地面（豊かな土と苔むした雰囲気）
+            const groundGeo = new THREE.PlaneGeometry(200, 200, 64, 64);
+            // 緩やかな起伏をつける
+            const pos = groundGeo.attributes.position;
+            for (let i = 0; i < pos.count; i++) {
+                const vx = pos.getX(i);
+                const vy = pos.getY(i);
+                const dist = Math.sqrt(vx * vx + vy * vy);
+                let z = Math.sin(vx * 0.05) * Math.cos(vy * 0.05) * 0.8;
+                if (dist > 30) {
+                    z += (dist - 30) * 0.08 * Math.sin(vx * 0.1); // 外周の山すそ
+                }
+                pos.setZ(i, z);
+            }
+            groundGeo.computeVertexNormals();
+
+            const groundMat = new THREE.MeshStandardMaterial({
+                color: 0x445533,
+                roughness: 0.9,
+                metalness: 0.1,
+                flatShading: false
+            });
+            const ground = new THREE.Mesh(groundGeo, groundMat);
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            scene.add(ground);
+
+            // 曲がりくねった土の道
+            const pathShape = new THREE.Shape();
+            pathShape.moveTo(-3, -80);
+            pathShape.bezierCurveTo(-3, -20, 4, -10, 2, 0);
+            pathShape.bezierCurveTo(0, 15, -6, 25, -4, 50);
+            pathShape.bezierCurveTo(-2, 70, 5, 80, 5, 90);
+
+            // 土の道を描画するシンプルな帯状メッシュ
+            const pathGeo = new THREE.PlaneGeometry(6, 180, 16, 64);
+            const pathMat = new THREE.MeshStandardMaterial({ color: 0x7a634e, roughness: 0.95 });
+            const pathMesh = new THREE.Mesh(pathGeo, pathMat);
+            pathMesh.rotation.x = -Math.PI / 2;
+            pathMesh.position.set(0, 0.05, 0);
+            pathMesh.receiveShadow = true;
+            scene.add(pathMesh);
+
+            // 遠景の山々
+            const mountainGeo = new THREE.ConeGeometry(50, 40, 8);
+            const mountainMat = new THREE.MeshStandardMaterial({ color: 0x3d5245, roughness: 0.9 });
+            
+            for (let i = 0; i < 12; i++) {
+                const m = new THREE.Mesh(mountainGeo, mountainMat);
+                const angle = (i / 12) * Math.PI * 2;
+                const radius = 120 + Math.random() * 30;
+                m.position.set(Math.cos(angle) * radius, 15, Math.sin(angle) * radius);
+                m.scale.set(1.5 + Math.random(), 0.8 + Math.random() * 0.6, 1.5 + Math.random());
+                scene.add(m);
+            }
+        }
+
+        // 合掌造りの家を生成する関数（最高品質のモデリング）
+        function createGasshoHouse(x, z, rotation, scale = 1) {
+            const houseGroup = new THREE.Group();
+            houseGroup.position.set(x, 0, z);
+            houseGroup.rotation.y = rotation;
+            houseGroup.scale.set(scale, scale, scale);
+
+            // マテリアル定義
+            const woodDarkMat = new THREE.MeshStandardMaterial({ color: 0x3d2817, roughness: 0.85, metalness: 0.05 });
+            const woodLightMat = new THREE.MeshStandardMaterial({ color: 0x8c6239, roughness: 0.8, metalness: 0.05 });
+            const plasterMat = new THREE.MeshStandardMaterial({ color: 0xd9d3c1, roughness: 0.7 }); // 白壁
+            const paperMat = new THREE.MeshStandardMaterial({ color: 0xf5f0dc, roughness: 0.9, emissive: 0x332211, emissiveIntensity: 0.2 }); // 障子
+            const stoneMat = new THREE.MeshStandardMaterial({ color: 0x5e5c58, roughness: 0.9, metalness: 0.1 });
+
+            // 1. 石垣の土台
+            const baseGeo = new THREE.BoxGeometry(11, 1.2, 15);
+            const baseMesh = new THREE.Mesh(baseGeo, stoneMat);
+            baseMesh.position.y = 0.6;
+            baseMesh.castShadow = true;
+            baseMesh.receiveShadow = true;
+            houseGroup.add(baseMesh);
+
+            // 2. 木造の1階・2階壁面躯体
+            const bodyGeo = new THREE.BoxGeometry(10, 4.5, 14);
+            const bodyMesh = new THREE.Mesh(bodyGeo, woodDarkMat);
+            bodyMesh.position.y = 3.25;
+            bodyMesh.castShadow = true;
+            bodyMesh.receiveShadow = true;
+            houseGroup.add(bodyMesh);
+
+            // 白壁部分のアクセント
+            const wallGeo = new THREE.BoxGeometry(10.2, 2.2, 14.2);
+            const wallMesh = new THREE.Mesh(wallGeo, plasterMat);
+            wallMesh.position.y = 2.8;
+            houseGroup.add(wallMesh);
+            // 木の梁・柱格子模様を重ねる
+            for (let i = -4; i <= 4; i += 2) {
+                const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2.3, 14.3), woodDarkMat);
+                pillar.position.set(i, 2.8, 0);
+                houseGroup.add(pillar);
+            }
+
+            // 3. 特徴的な急勾配の巨大な茅葺き屋根（合掌造り最大のハイライト）
+            // 屋根の厚みと繊維感を出すため、多層構造やカスタム形状でリッチに構築
+            const roofGroup = new THREE.Group();
+            roofGroup.position.y = 5.5;
+
+            // 切妻屋根のメイン形状（急勾配 60度近い傾斜）
+            // 茅の質感を出すためのダークブラウン・グレーがかったナチュラルカラー
+            const thatchMat = new THREE.MeshStandardMaterial({
+                color: 0x4a3b2c,
+                roughness: 0.95,
+                metalness: 0.05,
+            });
+
+            // 屋根の左面
+            const roofWingGeo = new THREE.BoxGeometry(1.2, 9, 16.5);
+            const leftRoof = new THREE.Mesh(roofWingGeo, thatchMat);
+            leftRoof.position.set(-3.8, 3.8, 0);
+            leftRoof.rotation.z = -Math.PI / 3.2; // 急な傾斜
+            leftRoof.castShadow = true;
+            leftRoof.receiveShadow = true;
+            roofGroup.add(leftRoof);
+
+            // 屋根の右面
+            const rightRoof = new THREE.Mesh(roofWingGeo, thatchMat);
+            rightRoof.position.set(3.8, 3.8, 0);
+            rightRoof.rotation.z = Math.PI / 3.2;
+            rightRoof.castShadow = true;
+            rightRoof.receiveShadow = true;
+            roofGroup.add(rightRoof);
+
+            // 屋根の合掌部分（棟・頂点キャップ）
+            const ridgeCapGeo = new THREE.BoxGeometry(0.8, 0.4, 16.6);
+            const ridgeCap = new THREE.Mesh(ridgeCapGeo, woodDarkMat);
+            ridgeCap.position.set(0, 7.6, 0);
+            ridgeCap.castShadow = true;
+            roofGroup.add(ridgeCap);
+
+            // 妻側（三角の側面壁と小屋根窓）
+            const gableGeo = new THREE.BufferGeometry();
+            // 三角形の妻壁
+            const gableMat = woodDarkMat;
+            // 簡易的に三角柱を配置
+            const gableMesh1 = new THREE.Mesh(new THREE.ConeGeometry(5.8, 5, 4), gableMat);
+            gableMesh1.position.set(0, 3.8, 7.1);
+            gableMesh1.rotation.y = Math.PI / 4;
+            gableMesh1.scale.set(1, 1, 0.3);
+            roofGroup.add(gableMesh1);
+
+            const gableMesh2 = gableMesh1.clone();
+            gableMesh2.position.z = -7.1;
+            roofGroup.add(gableMesh2);
+
+            // 屋根の厚みを強調する端面カバー（茅の断面表現）
+            const edgeMat = new THREE.MeshStandardMaterial({ color: 0x594633, roughness: 0.9 });
+            const edgeFront = new THREE.Mesh(new THREE.BoxGeometry(11.2, 0.6, 0.8), edgeMat);
+            edgeFront.position.set(0, -0.4, 8.1);
+            roofGroup.add(edgeFront);
+            const edgeBack = edgeFront.clone();
+            edgeBack.position.z = -8.1;
+            roofGroup.add(edgeBack);
+
+            houseGroup.add(roofGroup);
+
+            // 4. 窓・障子・玄関引き戸
+            // 正面玄関
+            const doorFrame = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.4, 0.2), woodDarkMat);
+            doorFrame.position.set(0, 1.8, 7.05);
+            houseGroup.add(doorFrame);
+
+            const door = new THREE.Mesh(new THREE.BoxGeometry(2, 2.2, 0.1), woodLightMat);
+            door.position.set(0, 1.8, 7.1);
+            houseGroup.add(door);
+
+            // 窓（障子風）
+            for (let i = -3.5; i <= 3.5; i += 3.5) {
+                if (Math.abs(i) < 0.5) continue;
+                const windowMesh = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.4, 0.1), paperMat);
+                windowMesh.position.set(i, 2.2, 7.05);
+                houseGroup.add(windowMesh);
+                
+                const winFrame = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.6, 0.15), woodDarkMat);
+                winFrame.position.set(i, 2.2, 7.0);
+                houseGroup.add(winFrame);
+            }
+
+            // 当たり判定用コライダー登録
+            const colliderBox = new THREE.Box3().setFromObject(baseMesh);
+            colliderBox.expandByScalar(0.5);
+            colliders.push({ type: 'box', box: colliderBox, mesh: houseGroup });
+
+            scene.add(houseGroup);
+            return houseGroup;
+        }
+
+        function createVillage() {
+            // メインの最も高品質な合掌造りの家（中央）
+            createGasshoHouse(0, 0, 0, 1.2);
+
+            // 周囲の合掌造りの家（2〜3軒を美しく配置）
+            createGasshoHouse(-14, -15, Math.PI / 6, 1.0);
+            createGasshoHouse(15, -10, -Math.PI / 8, 1.1);
+            createGasshoHouse(10, 18, Math.PI / 4, 0.95);
+        }
+
+        function createEnvironment() {
+            // 石垣や木の柵、薪、石灯籠などの生活感のある小物を配置
+            const woodMat = new THREE.MeshStandardMaterial({ color: 0x59412a, roughness: 0.8 });
+            const stoneMat = new THREE.MeshStandardMaterial({ color: 0x6e6b66, roughness: 0.9 });
+
+            // 薪の束（合掌造りの軒下によくある風景）
+            for (let hx of [-6, 12, -10]) {
+                const logGroup = new THREE.Group();
+                for (let i = 0; i < 7; i++) {
+                    const log = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 2.2, 6), woodMat);
+                    log.rotation.z = Math.PI / 2;
+                    log.position.set((i % 3) * 0.4 - 0.2, Math.floor(i / 3) * 0.35 + 0.2, hx);
+                    logGroup.add(log);
+                }
+                scene.add(logGroup);
+            }
+
+            // 石灯籠・石標の配置
+            const lanternBase = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.2, 0.8), stoneMat);
+            lanternBase.position.set(3, 0.6, 6);
+            lanternBase.castShadow = true;
+            scene.add(lanternBase);
+
+            const lanternTop = new THREE.Mesh(new THREE.CylinderGeometry(0, 0.7, 0.8, 4), stoneMat);
+            lanternTop.position.set(3, 1.5, 6);
+            scene.add(lanternTop);
+
+            // 木々（豊かな日本の山村の木）
+            createTrees();
+        }
+
+        function createTrees() {
+            const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3728, roughness: 0.9 });
+            const leavesMat = new THREE.MeshStandardMaterial({ color: 0x2e4a2d, roughness: 0.8 });
+            const leavesMat2 = new THREE.MeshStandardMaterial({ color: 0x3b5c38, roughness: 0.8 });
+
+            // 村を囲む木々をランダムに配置
+            const treePositions = [
+                [-22, -15], [-25, 5], [-20, 25],
+                [22, -20], [25, 10], [18, 30],
+                [-5, -35], [8, -32], [-12, 38], [14, 42]
+            ];
+
+            treePositions.forEach(pos => {
+                const treeGroup = new THREE.Group();
+                treeGroup.position.set(pos[0], 0, pos[1]);
+
+                // 幹
+                const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.9, 4, 7), trunkMat);
+                trunk.position.y = 2;
+                trunk.castShadow = true;
+                treeGroup.add(trunk);
+
+                // 葉（多層構造の美しいボリューム）
+                const l1 = new THREE.Mesh(new THREE.ConeGeometry(3.5, 5, 6), Math.random() > 0.5 ? leavesMat : leavesMat2);
+                l1.position.y = 4.5;
+                l1.castShadow = true;
+                treeGroup.add(l1);
+
+                const l2 = new THREE.Mesh(new THREE.ConeGeometry(2.8, 4, 6), leavesMat2);
+                l2.position.y = 7;
+                l2.castShadow = true;
+                treeGroup.add(l2);
+
+                scene.add(treeGroup);
+            });
+        }
+
+        function createPlayer() {
+            player = new THREE.Group();
+            player.position.set(0, 0, 10); // 道のあたりに初期配置
+
+            const clothMat = new THREE.MeshStandardMaterial({ color: 0x2c4a6f, roughness: 0.8 }); // 藍染め風の着物・衣服
+            const skinMat = new THREE.MeshStandardMaterial({ color: 0xf2d3b6, roughness: 0.7 });
+            const hairMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 });
+            const strawHatMat = new THREE.MeshStandardMaterial({ color: 0xc2a65b, roughness: 0.9 }); // 笠
+
+            // 胴体
+            const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.25, 1.1, 8), clothMat);
+            torso.position.y = 1.0;
+            torso.castShadow = true;
+            player.add(torso);
+
+            // 頭部
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.25, 12, 12), skinMat);
+            head.position.y = 1.7;
+            head.castShadow = true;
+            player.add(head);
+
+            // 髪
+            const hair = new THREE.Mesh(new THREE.SphereGeometry(0.26, 10, 10), hairMat);
+            hair.position.set(0, 1.75, -0.05);
+            hair.scale.set(1, 0.9, 1.1);
+            player.add(hair);
+
+            // 旅笠（笠をかぶった日本の旅人風シルエット）
+            const hat = new THREE.Mesh(new THREE.ConeGeometry(0.6, 0.2, 12), strawHatMat);
+            hat.position.set(0, 1.95, 0);
+            hat.castShadow = true;
+            player.add(hat);
+
+            // 四肢（歩行アニメーション用）
+            const limbMat = new THREE.MeshStandardMaterial({ color: 0x1e2d40, roughness: 0.8 });
+            
+            const leftLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.1, 0.8, 6), limbMat);
+            leftLeg.position.set(-0.15, 0.4, 0);
+            leftLeg.name = 'leftLeg';
+            leftLeg.castShadow = true;
+            player.add(leftLeg);
+
+            const rightLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.1, 0.8, 6), limbMat);
+            rightLeg.position.set(0.15, 0.4, 0);
+            rightLeg.name = 'rightLeg';
+            rightLeg.castShadow = true;
+            player.add(rightLeg);
+
+            scene.add(player);
+            playerBody = player;
+        }
+
+        function handleKey(e, isDown) {
+            switch(e.code) {
+                case 'KeyW': case 'ArrowUp': keys.w = isDown; break;
+                case 'KeyS': case 'ArrowDown': keys.s = isDown; break;
+                case 'KeyA': case 'ArrowLeft': keys.a = isDown; break;
+                case 'KeyD': case 'ArrowRight': keys.d = isDown; break;
+                case 'ShiftLeft': case 'ShiftRight': keys.shift = isDown; break;
+                case 'Space': if(isDown && isGrounded) { playerVelocity.y = 0.25; isGrounded = false; } break;
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // FPS計測
+            frameCount++;
+            const now = performance.now();
+            if (now - lastTime >= 1000) {
+                fps = Math.round((frameCount * 1000) / (now - lastTime));
+                document.getElementById('fps-counter').innerText = fps;
+                frameCount = 0;
+                lastTime = now;
+            }
+
+            // プレイヤー移動計算
+            const moveDir = new THREE.Vector3();
+            const camForward = new THREE.Vector3(Math.sin(cameraAngleX), 0, Math.cos(cameraAngleX));
+            const camRight = new THREE.Vector3(Math.cos(cameraAngleX), 0, -Math.sin(cameraAngleX));
+
+            if (keys.w) moveDir.add(camForward);
+            if (keys.s) moveDir.sub(camForward);
+            if (keys.d) moveDir.add(camRight);
+            if (keys.a) moveDir.sub(camRight);
+
+            let currentSpeed = playerSpeed;
+            if (keys.shift) currentSpeed *= playerRunMultiplier;
+
+            if (moveDir.lengthSq() > 0) {
+                moveDir.normalize();
+                player.position.addScaledVector(moveDir, currentSpeed);
+
+                // プレイヤーの向きを移動方向に滑らかに向ける
+                const targetRotation = Math.atan2(moveDir.x, moveDir.z);
+                let diff = targetRotation - player.rotation.y;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+                player.rotation.y += diff * 0.15;
+
+                // 歩行アニメーション（足の前後スイング）
+                playerAnimTime += currentSpeed * 4;
+                const lLeg = player.getObjectByName('leftLeg');
+                const rLeg = player.getObjectByName('rightLeg');
+                if (lLeg && rLeg) {
+                    lLeg.rotation.x = Math.sin(playerAnimTime) * 0.6;
+                    rLeg.rotation.x = -Math.sin(playerAnimTime) * 0.6;
+                }
+            } else {
+                // 停止時、足をリセット
+                const lLeg = player.getObjectByName('leftLeg');
+                const rLeg = player.getObjectByName('rightLeg');
+                if (lLeg && rLeg) {
+                    lLeg.rotation.x *= 0.8;
+                    rLeg.rotation.x *= 0.8;
+                }
+            }
+
+            // 重力とジャンプ処理
+            playerVelocity.y -= gravity;
+            player.position.y += playerVelocity.y;
+
+            // 地面との当たり判定（簡易平地判定 y = 0）
+            if (player.position.y <= 0) {
+                player.position.y = 0;
+                playerVelocity.y = 0;
+                isGrounded = true;
+            }
+
+            // 家との簡易当たり判定（コリジョン押し出し）
+            colliders.forEach(col => {
+                if (col.type === 'box') {
+                    const pPos = player.position;
+                    // 家の中心からの距離簡易チェック
+                    const box = col.box;
+                    if (pPos.x > box.min.x - 0.6 && pPos.x < box.max.x + 0.6 &&
+                        pPos.z > box.min.z - 0.6 && pPos.z < box.max.z + 0.6 &&
+                        pPos.y < box.max.y) {
+                        // 最も近い境界へ押し出す
+                        const dx1 = Math.abs(pPos.x - box.min.x);
+                        const dx2 = Math.abs(pPos.x - box.max.x);
+                        const dz1 = Math.abs(pPos.z - box.min.z);
+                        const dz2 = Math.abs(pPos.z - box.max.z);
+                        const minD = Math.min(dx1, dx2, dz1, dz2);
+
+                        if (minD === dx1) pPos.x = box.min.x - 0.6;
+                        else if (minD === dx2) pPos.x = box.max.x + 0.6;
+                        else if (minD === dz1) pPos.z = box.min.z - 0.6;
+                        else if (minD === dz2) pPos.z = box.max.z + 0.6;
+                    }
+                }
+            });
+
+            // マップ外への移動制限
+            player.position.x = Math.max(-85, Math.min(85, player.position.x));
+            player.position.z = Math.max(-85, Math.min(85, player.position.z));
+
+            // カメラの追従（滑らかなサードパーソン視点）
+            const targetCamX = player.position.x - Math.sin(cameraAngleX) * Math.cos(cameraAngleY) * cameraDistance;
+            const targetCamY = player.position.y + Math.sin(cameraAngleY) * cameraDistance + 1.2;
+            const targetCamZ = player.position.z - Math.cos(cameraAngleX) * Math.cos(cameraAngleY) * cameraDistance;
+
+            camera.position.x += (targetCamX - camera.position.x) * 0.1;
+            camera.position.y += (targetCamY - camera.position.y) * 0.1;
+            camera.position.z += (targetCamZ - camera.position.z) * 0.1;
+
+            camera.lookAt(player.position.x, player.position.y + 1.2, player.position.z);
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>

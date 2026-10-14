@@ -1,0 +1,128 @@
+:root {
+  --hud-bg: rgba(28, 24, 20, 0.62);
+  --hud-border: rgba(255, 240, 220, 0.14);
+  --hud-text: #f1e9dc;
+  --hud-accent: #e3c27a;
+  font-family: 'Hiragino Sans', 'Yu Gothic UI', 'Meiryo', system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #1a1a1a;
+  color: var(--hud-text);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#app,
+#canvas-root {
+  position: fixed;
+  inset: 0;
+}
+
+#canvas-root canvas {
+  display: block;
+  touch-action: none;
+  cursor: grab;
+}
+
+#canvas-root canvas:active {
+  cursor: grabbing;
+}
+
+#hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  padding: 16px;
+}
+
+.hud-title,
+.hud-help,
+.hud-debug {
+  position: absolute;
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 10px;
+  backdrop-filter: blur(6px);
+}
+
+.hud-title {
+  top: 16px;
+  left: 16px;
+  padding: 8px 14px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.hud-title-main {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--hud-accent);
+}
+
+.hud-title-sub {
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.hud-help {
+  left: 16px;
+  bottom: 16px;
+  padding: 8px 12px;
+  font-size: 12px;
+  display: grid;
+  gap: 4px;
+}
+
+.hud-help div {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.hud-help kbd {
+  min-width: 64px;
+  text-align: center;
+  font-family: inherit;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--hud-accent);
+}
+
+.hud-debug {
+  right: 16px;
+  bottom: 16px;
+  padding: 8px 12px;
+  font: 12px/1.5 ui-monospace, Consolas, monospace;
+  white-space: pre;
+}
+
+.hud-fatal {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: min(480px, calc(100% - 32px));
+  height: fit-content;
+  padding: 20px;
+  background: rgba(40, 20, 20, 0.92);
+  border-radius: 10px;
+  line-height: 1.6;
+  pointer-events: auto;
+}
+
+[hidden] {
+  display: none !important;
+}
