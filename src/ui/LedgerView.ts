@@ -53,8 +53,8 @@ export class LedgerView {
           el('span', 'ledger-kind', item.kind),
           el('span', 'ledger-detail', item.detail),
         );
-        const settle = el('div', `ledger-settle ${item.settled ? 'is-settled' : 'is-open'}`);
-        settle.append(el('span', 'ledger-settle-chip', item.settled ? '返し 済' : '返し まだ'), el('span', undefined, item.settlementNote));
+        const settle = el('div', `ledger-settle is-${item.settlement}`);
+        settle.append(el('span', 'ledger-settle-chip', item.settlementLabel), el('span', undefined, item.settlementNote));
         row.append(line, settle);
         if (item.currentStance.length > 0) {
           const now = el('div', 'ledger-now');

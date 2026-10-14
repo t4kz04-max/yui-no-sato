@@ -22,6 +22,8 @@ import { NotebookView, type NotebookTab } from '../ui/NotebookView';
 import { LedgerView } from '../ui/LedgerView';
 import { MenuPanel, type MenuContent } from '../ui/MenuPanel';
 import { Toasts } from '../ui/Toasts';
+import { PlanView } from '../ui/PlanView';
+import { ResultView } from '../ui/ResultView';
 import { World } from '../world/World';
 import { PLAYER_START, type LocationId } from '../world/layout';
 import { resolveArea } from '../world/areas';
@@ -37,6 +39,9 @@ import { currentObjective } from '../content/objectives';
 import { HOUSEHOLDS, STORY_DEFS } from '../content/story';
 import { LEDGER, LEDGER_NOTE, LEDGER_TITLE } from '../content/ledger';
 import { buildLedger, buildNotebook, type JournalSources } from '../journal/models';
+import { buildOutcome, buildPlanBoard, describePlan, type PlanSources } from '../journal/planModels';
+import { INITIAL_PLAN, OUTCOMES, PLANNING_AVAILABLE, RESPONSE_SUMMARY } from '../content/plan';
+import { evaluate } from '../story/conditions';
 import { createSave, type SaveFile } from '../save/saveData';
 import { SaveStore, browserStorage } from '../save/SaveStore';
 import { allowsExploration, nextMode, type UiAction, type UiMode } from './modes';
@@ -46,7 +51,13 @@ import type { GameEvents } from './events';
 const TALK_CAMERA = { yawOffset: 0.85, pitch: 0.2, distance: 5.2 } as const;
 /** 案内表示を出す高さ（住民の頭上）。 */
 const NPC_PROMPT_HEIGHT = 2.55;
-const JOURNAL_SOURCES: JournalSources = { characters: CHARACTERS, households: HOUSEHOLDS };
+const JOURNAL_SOURCES: JournalSources = { characters: CHARACTERS, households: HOUSEHOLDS, planSummaries: RESPONSE_SUMMARY };
+const PLAN_SOURCES: PlanSources = {
+  ...JOURNAL_SOURCES,
+  summaries: RESPONSE_SUMMARY,
+  outcomes: OUTCOMES,
+  considerationTopics: ['sae.dateReason', 'sae.roof', 'isuke.availability', 'isuke.field', 'isuke.pastHelp'],
+};
 const NOTEBOOK_TAB_KEYS: ReadonlyArray<[string, NotebookTab]> = [
   ['Digit1', 'people'],
   ['Digit2', 'known'],
@@ -82,6 +93,8 @@ export class Game {
   private readonly prompt: InteractionPrompt;
   private readonly notebook: NotebookView;
   private readonly ledger: LedgerView;
+  private readonly planView: PlanView;
+  private readonly resultView: ResultView;
   private readonly pauseMenu: MenuPanel;
   private readonly notice: MenuPanel;
   private readonly toasts: Toasts;
@@ -116,6 +129,13 @@ export class Game {
       onClose: () => this.dispatch('close'),
       onNotebook: () => this.dispatch('openNotebook'),
     });
+    this.planView = new PlanView(hudRoot, {
+      onSelect: (item, option) => this.onPlanSelect(item, option),
+      onDecide: () => this.onPlanDecide(),
+      onClose: () => this.dispatch('close'),
+      onNotebook: () => this.dispatch('openNotebook'),
+    });
+    this.resultView = new ResultView(hudRoot, () => this.dispatch('close'));
     this.pauseMenu = new MenuPanel(hudRoot, 'pause-layer', (id) => this.onPauseItem(id));
     this.notice = new MenuPanel(hudRoot, 'notice-layer', (id) => this.noticeHandlers[id]?.());
 
@@ -195,8 +215,21 @@ export class Game {
       this.toasts.push('約束', '新しい約束を書き留めた');
       this.refreshNotebookBadge();
     });
+    const refreshPlan = () => {
+      refreshObjective();
+      if (this.uiMode === 'plan') this.planView.show(buildPlanBoard(this.story, PLAN_SOURCES));
+    };
+    this.events.on('planDrafted', refreshPlan);
+    this.events.on('planDecided', refreshPlan);
+    this.events.on('planResponded', ({ npc, status }) => {
+      refreshPlan();
+      const who = CHARACTERS[npc as CharacterId]?.name ?? npc;
+      this.toasts.push('相談', `${who}：今の案への返事は「${CONSENT_LABEL[status]}」`);
+      this.refreshNotebookBadge();
+    });
     this.events.on('storyRestored', () => {
       refreshObjective();
+      this.world.setSaeRoofRenewed(this.story.currentStage('sae.roof') === 'renewed');
       this.refreshNotebookBadge();
     });
     this.events.on('areaEntered', ({ location }) => {
@@ -220,11 +253,18 @@ export class Game {
       this.refreshNotebookBadge();
     }
     if (prev === 'ledger') this.ledger.hide();
+    if (prev === 'plan') this.planView.hide();
+    if (prev === 'result') this.resultView.hide();
     if (prev === 'pause') this.pauseMenu.hide();
     if (prev === 'notice') this.notice.hide();
 
     if (next === 'notebook') this.notebook.show(buildNotebook(this.story, JOURNAL_SOURCES), this.notebookSeenOrder);
-    if (next === 'ledger') this.ledger.show(buildLedger(this.story, LEDGER, JOURNAL_SOURCES));
+    if (next === 'ledger') this.ledger.show(buildLedger(this.story, this.ledgerEntries(), JOURNAL_SOURCES));
+    if (next === 'plan') this.planView.show(buildPlanBoard(this.story, PLAN_SOURCES));
+    if (next === 'result') {
+      const outcome = buildOutcome(this.story, OUTCOMES);
+      if (outcome) this.resultView.show(outcome);
+    }
     if (next === 'pause') this.pauseMenu.show(this.pauseContent());
     // お知らせの中身は showNotice で表示する
     this.hud.setOverlayMode(next !== 'explore' && next !== 'dialogue');
@@ -255,6 +295,15 @@ export class Game {
       case 'ledger':
         if (this.input.wasPressed('Escape')) this.dispatch('esc');
         else if (this.input.wasPressed('Tab')) this.dispatch('tab');
+        break;
+      case 'plan':
+        if (this.input.wasPressed('Escape')) this.dispatch('esc');
+        else if (this.input.wasPressed('Tab')) this.dispatch('tab');
+        break;
+      case 'result':
+        if (this.input.wasPressed('Escape') || this.input.wasPressed('Enter') || this.input.wasPressed('NumpadEnter')) {
+          this.dispatch('close');
+        }
         break;
       case 'pause':
         if (this.input.wasPressed('Escape')) this.dispatch('esc');
@@ -386,6 +435,56 @@ export class Game {
     this.saveGame();
     const def = INTERACTABLES.find((i) => i.id === id);
     if (!cancelled && def?.kind === 'object' && def.opens === 'ledger') this.dispatch('openLedger');
+    if (!cancelled && def?.kind === 'object' && def.opens === 'plan') this.openPlanBoard();
+  }
+
+  // ───────── 計画（作業台） ─────────
+
+  /** 作業台を開く。サエから日取りの話を聞くまでは開かない。初めて開いたときはサエの元の案を広げる。 */
+  private openPlanBoard(): void {
+    const decided = this.story.planPhase() === 'decided';
+    if (!decided && !evaluate(PLANNING_AVAILABLE, this.story)) return;
+    if (!decided && !this.story.planDraft()) this.story.setPlanDraft(INITIAL_PLAN);
+    this.dispatch('openPlan');
+  }
+
+  private onPlanSelect(item: string, option: string): void {
+    const draft = this.story.planDraft();
+    if (!draft || this.uiMode !== 'plan') return;
+    this.story.setPlanDraft({ ...draft, [item]: option });
+  }
+
+  private onPlanDecide(): void {
+    const draft = this.story.planDraft();
+    if (this.story.planPhase() !== 'ready' || !draft) return;
+    this.showNotice(
+      {
+        title: 'この段取りで決めますか？',
+        body: `${describePlan(this.story, draft)}
+決めた後は変えられません。`,
+        items: [
+          { id: 'no', label: 'もう少し考える' },
+          { id: 'yes', label: 'この段取りで決める' },
+        ],
+        defaultId: 'no',
+      },
+      { no: () => this.dispatch('openPlan'), yes: () => this.decidePlan() },
+    );
+  }
+
+  private decidePlan(): void {
+    const outcome = this.story.decidePlan({ source: '作業台で決めた' });
+    if (!outcome) return;
+    this.world.setSaeRoofRenewed(true);
+    this.saveGame();
+    this.dispatch('openResult');
+  }
+
+  /** 結帳に載せる記録（過去の記録＋決めた計画の結果として書き加えられた記録）。 */
+  private ledgerEntries() {
+    const outcome = this.story.outcome();
+    const added = outcome ? OUTCOMES[outcome]?.ledger : undefined;
+    return added ? [...LEDGER, added] : LEDGER;
   }
 
   private restoreCamera(): void {

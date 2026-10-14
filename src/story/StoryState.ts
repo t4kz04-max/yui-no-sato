@@ -7,6 +7,10 @@ import type {
   HouseholdId,
   LearnedStage,
   NpcId,
+  PlanDecision,
+  PlanPhase,
+  PlanResponse,
+  PlanSpec,
   PromiseRecord,
   RequestId,
   StageId,
@@ -28,6 +32,11 @@ export interface StoryEvents {
   };
   npcMet: { readonly npc: NpcId };
   promiseRecorded: { readonly id: string };
+  /** 作業台で案が変わった。 */
+  planDrafted: { readonly plan: PlanSpec };
+  /** 住民が今の案に返事をした。 */
+  planResponded: { readonly npc: NpcId; readonly status: ConsentStatus; readonly reason: string };
+  planDecided: { readonly outcome: string };
   /** 記録の読込・最初からやり直しで状態全体が置き換わった。 */
   storyRestored: Record<string, never>;
 }
@@ -53,6 +62,9 @@ export class StoryState implements StoryQuery {
   private readonly met = new Set<NpcId>();
   private readonly consents = new Map<NpcId, ConsentEntry[]>();
   private readonly promises: PromiseRecord[] = [];
+  private draft: PlanSpec | null = null;
+  private readonly responses: PlanResponse[] = [];
+  private decision: PlanDecision | null = null;
 
   constructor(
     readonly defs: StoryDefinitions,
@@ -190,6 +202,125 @@ export class StoryState implements StoryQuery {
     return true;
   }
 
+  // ───────── 計画（Phase 3） ─────────
+
+  /** 案の識別子（項目の順に並べた文字列）。同じ内容の案は同じ識別子になる。 */
+  planSignature(plan: PlanSpec): string {
+    const items = this.defs.planning?.items ?? [];
+    return items.map((i) => `${i.id}=${plan[i.id] ?? ''}`).join(';');
+  }
+
+  planDraft(): PlanSpec | null {
+    return this.draft;
+  }
+
+  planDecision(): PlanDecision | null {
+    return this.decision;
+  }
+
+  outcome(): string | undefined {
+    return this.decision?.outcome;
+  }
+
+  /** すべての返事（古い順）。案を変える前の返事も履歴として残る。 */
+  planResponses(): readonly PlanResponse[] {
+    return this.responses;
+  }
+
+  /** 案を作る・変える。決定後は変えられない。選択肢 ID は定義にあるものだけ受け付ける。 */
+  setPlanDraft(plan: PlanSpec): boolean {
+    const planning = this.requirePlanning();
+    if (this.decision) return false;
+    for (const item of planning.items) {
+      const opt = plan[item.id];
+      if (!item.options.some((o) => o.id === opt)) throw new Error(`計画の項目 ${item.id} に選択肢 ${opt} はありません`);
+    }
+    const normalized: PlanSpec = Object.fromEntries(planning.items.map((i) => [i.id, plan[i.id]!]));
+    if (this.draft && this.planSignature(this.draft) === this.planSignature(normalized)) return false;
+    this.draft = normalized;
+    this.tick();
+    this.events?.emit('planDrafted', { plan: normalized });
+    return true;
+  }
+
+  /** 今の案に返事が必要な住民（案が成り立たないときは空）。 */
+  planInvolved(): NpcId[] {
+    const planning = this.defs.planning;
+    if (!planning || !this.draft || planning.invalidReason(this.draft) !== null) return [];
+    return planning.involved(this.draft);
+  }
+
+  /** 案（省略時は今の案）に対するこの住民の返事。 */
+  planResponse(npc: NpcId, plan: PlanSpec | null = this.draft): PlanResponse | undefined {
+    if (!plan) return undefined;
+    const sig = this.planSignature(plan);
+    for (let i = this.responses.length - 1; i >= 0; i--) {
+      const r = this.responses[i]!;
+      if (r.npc === npc && this.planSignature(r.plan) === sig) return r;
+    }
+    return undefined;
+  }
+
+  isPlanPending(npc: NpcId): boolean {
+    return !this.decision && this.planInvolved().includes(npc) && !this.planResponse(npc);
+  }
+
+  planReason(npc: NpcId): string | undefined {
+    return this.planResponse(npc)?.reason;
+  }
+
+  planPhase(): PlanPhase {
+    if (this.decision) return 'decided';
+    if (!this.draft) return 'none';
+    if (this.defs.planning?.invalidReason(this.draft) !== null) return 'revise';
+    const involved = this.planInvolved();
+    const answers = involved.map((n) => this.planResponse(n));
+    if (answers.some((a) => a && a.status !== 'agreed')) return 'revise';
+    if (answers.some((a) => !a)) return 'pending';
+    return 'ready';
+  }
+
+  /**
+   * 今の案を住民に相談し、返事を記録する。返事は規則（今の事情と提案内容）だけで決まり、
+   * 同じ案にすでに返事があればそれを返す（相談し直しても変わらない）。
+   */
+  consultPlan(npc: NpcId, ctx: EffectContext = {}): PlanResponse | null {
+    const planning = this.requirePlanning();
+    if (this.decision || !this.draft || !this.planInvolved().includes(npc)) return null;
+    const existing = this.planResponse(npc);
+    if (existing) return existing;
+    const rule = planning.respond(npc, this.draft);
+    const response: PlanResponse = {
+      npc,
+      plan: this.draft,
+      status: rule.status,
+      reason: rule.reason,
+      order: this.tick(),
+      ...(ctx.source ? { source: ctx.source } : {}),
+    };
+    this.responses.push(response);
+    this.events?.emit('planResponded', { npc, status: rule.status, reason: rule.reason });
+    return response;
+  }
+
+  /** 関係者全員が今の案を承諾していれば決定し、結果の効果を適用する。決定できなければ null。 */
+  decidePlan(ctx: EffectContext = {}): string | null {
+    const planning = this.requirePlanning();
+    if (this.planPhase() !== 'ready' || !this.draft) return null;
+    const outcome = planning.outcome(this.draft);
+    if (!outcome) return null;
+    this.decision = { plan: this.draft, outcome, order: this.tick() };
+    this.apply(planning.outcomeEffects(outcome), ctx);
+    this.events?.emit('planDecided', { outcome });
+    return outcome;
+  }
+
+  private requirePlanning() {
+    const planning = this.defs.planning;
+    if (!planning) throw new Error('計画の定義がありません');
+    return planning;
+  }
+
   // ───────── 効果の適用 ─────────
 
   apply(effects: readonly Effect[] | undefined, ctx: EffectContext = {}): void {
@@ -204,6 +335,9 @@ export class StoryState implements StoryQuery {
           break;
         case 'setConsent':
           this.setConsent(effect.npc, effect.request, effect.status, effect.note, ctx);
+          break;
+        case 'consultPlan':
+          this.consultPlan(effect.npc, ctx);
           break;
         case 'recordPromise':
           this.recordPromise(effect.id, effect.from, effect.to, effect.content, ctx);
@@ -227,6 +361,7 @@ export class StoryState implements StoryQuery {
       learned: this.allLearned(),
       npcs: [...npcIds].map((id) => ({ id, met: this.met.has(id), consents: [...(this.consents.get(id) ?? [])] })),
       promises: [...this.promises],
+      plan: { draft: this.draft, responses: [...this.responses], decision: this.decision },
     };
   }
 
@@ -240,6 +375,9 @@ export class StoryState implements StoryQuery {
     this.met.clear();
     this.consents.clear();
     this.promises.length = 0;
+    this.draft = null;
+    this.responses.length = 0;
+    this.decision = null;
     this.clock = 0;
     if (snapshot) {
       snapshot.flags.forEach((f) => this.flags.add(f));
@@ -253,6 +391,9 @@ export class StoryState implements StoryQuery {
         if (n.consents.length > 0) this.consents.set(n.id, [...n.consents].sort((a, b) => a.order - b.order));
       }
       this.promises.push(...[...snapshot.promises].sort((a, b) => a.order - b.order));
+      this.draft = snapshot.plan.draft;
+      this.responses.push(...[...snapshot.plan.responses].sort((a, b) => a.order - b.order));
+      this.decision = snapshot.plan.decision;
       this.clock = snapshot.clock;
     }
     this.events?.emit('storyRestored', {});

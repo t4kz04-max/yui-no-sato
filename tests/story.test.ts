@@ -215,7 +215,14 @@ describe('StoryState：保存と復元', () => {
     state.learn('field', 'seen');
     state.markMet('other');
     state.restore();
-    expect(state.snapshot()).toEqual({ clock: 0, flags: [], learned: [], npcs: [], promises: [] });
+    expect(state.snapshot()).toEqual({
+      clock: 0,
+      flags: [],
+      learned: [],
+      npcs: [],
+      promises: [],
+      plan: { draft: null, responses: [], decision: null },
+    });
   });
 });
 

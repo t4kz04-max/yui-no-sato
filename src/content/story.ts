@@ -1,5 +1,6 @@
 import type { HouseholdId, RequestDef, StoryDefinitions, TopicDef } from '../story/types';
 import { CHARACTERS } from './characters';
+import { PLANNING } from './plan';
 
 /**
  * 情報（トピック）・依頼・家の定義。docs/STATE_TABLE.md の第2〜3節と対応する。
@@ -20,20 +21,41 @@ const topicList: readonly TopicDef[] = [
     person: 'sae',
     stages: [
       { id: 'hesitant', category: 'unconfirmed', text: 'サエは今の日取りで進めたがっている。理由はまだ聞けていない。' },
-      // 設計書 D「延期することにも家族の事情がある」の段階は、内容と入手方法が未確定のため未定義（STATE_TABLE §9）
+      // 以下 2 段階は Phase 3 の暫定設定（ユーザー指定）。設計書 D の「家族の事情」の中身は確定しない
+      {
+        id: 'roofWorry',
+        category: 'known',
+        text: '屋根の傷みが進むのが心配で、日取りを延ばしたくない。',
+      },
+      {
+        id: 'burden',
+        category: 'known',
+        text: '屋根の傷みが進むのは心配。けれど、急ぐことで他の家に負担をかけることも気にしている。十二年前の伊助家への返しがまだなことも気がかりだ。',
+      },
     ],
   },
   {
     id: 'sae.roof',
     title: 'サエ家の屋根',
     person: 'sae',
-    stages: [{ id: 'worn', category: 'known', text: '茅が黒ずんで薄くなっている所がある。葺き替えが必要なのは確かだ。' }],
+    stages: [
+      { id: 'worn', category: 'known', text: '茅が黒ずんで薄くなっている所がある。葺き替えが必要なのは確かだ。' },
+      { id: 'worse', category: 'known', text: '葺き替えを待つあいだに、屋根の傷みが広がった。' },
+      { id: 'renewed', category: 'known', text: 'サエ家の屋根は葺き替えられた。' },
+    ],
   },
   {
     id: 'isuke.field',
     title: '伊助の畑',
     person: 'isuke',
-    stages: [{ id: 'harvesting', category: 'known', text: '伊助の畑は稲の刈り入れの最中。はさ掛けはまだ半分ほどしか済んでいない。' }],
+    stages: [
+      { id: 'harvesting', category: 'known', text: '伊助の畑は稲の刈り入れの最中。はさ掛けはまだ半分ほどしか済んでいない。' },
+      {
+        id: 'progress',
+        category: 'known',
+        text: '刈り入れはあと十日ほどかかりそうだ。人手があれば、もっと早く済むかもしれない。',
+      },
+    ],
   },
   {
     id: 'isuke.availability',
@@ -42,6 +64,11 @@ const topicList: readonly TopicDef[] = [
     stages: [
       { id: 'declined', category: 'unconfirmed', text: '伊助は屋根葺きの日は手伝えないと言う。理由はまだ分からない。' },
       { id: 'harvest', category: 'known', text: '予定日は伊助の稲の刈り入れと重なる。天気のいいうちに刈って掛けなければならない。' },
+      {
+        id: 'dayBefore',
+        category: 'known',
+        text: '前の日の半日なら、畑を離れられるかもしれない。ただ、その分刈り入れは遅れる。',
+      },
     ],
   },
   {
@@ -52,7 +79,7 @@ const topicList: readonly TopicDef[] = [
       {
         id: 'onRecord',
         category: 'known',
-        text: '結帳によると、十二年前のサエ家の屋根葺きで伊助家が人手を出した。その返しはまだ済んでいない。',
+        text: '十二年前のサエ家の屋根葺きで、伊助家が人手を出した。その返しはまだ済んでいない。',
       },
       {
         id: 'isukeView',
@@ -116,6 +143,7 @@ export const REQUESTS: Readonly<Record<string, RequestDef>> = {
   roofDay: { id: 'roofDay', label: '屋根葺き当日の手伝い' },
   lendKaya: { id: 'lendKaya', label: '茅の貸し出し' },
   showRecords: { id: 'showRecords', label: '貸し借りの控えを見せてもらう' },
+  roofPrep: { id: 'roofPrep', label: '屋根葺き前日の準備の手伝い' },
 };
 
 /** 結帳・約束の当事者になる家。 */
@@ -124,6 +152,7 @@ export const HOUSEHOLDS: Readonly<Record<HouseholdId, { readonly name: string; r
   isuke: { name: '伊助家', person: 'isuke' },
   mine: { name: 'ミネ家', person: 'mine' },
   sohei: { name: '宗平', person: 'sohei' },
+  village: { name: '村の人たち' },
 };
 
 export const STORY_DEFS: StoryDefinitions = {
@@ -131,4 +160,5 @@ export const STORY_DEFS: StoryDefinitions = {
   requests: REQUESTS,
   npcs: Object.keys(CHARACTERS),
   households: Object.keys(HOUSEHOLDS),
+  planning: PLANNING,
 };

@@ -28,6 +28,11 @@ export interface DialogueNode {
   readonly choices?: readonly DialogueChoice[];
   /** 最後のページを送った後に進む場面。choices も next もなければ会話を終える。 */
   readonly next?: NodeId;
+  /**
+   * 最後のページを送った後、上から順に条件を調べ、最初に成立した場面へ進む（どれも成立しなければ next）。
+   * 場面に入ったときの効果を適用した後の状態で判定する（例：相談の返事によって反応を変える）。choices とは併用しない。
+   */
+  readonly branches?: ReadonlyArray<{ readonly when: Condition; readonly next: NodeId }>;
 }
 
 export interface DialogueEntry {

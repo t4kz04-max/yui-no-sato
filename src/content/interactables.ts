@@ -102,6 +102,7 @@ export const INTERACTABLES: readonly Interactable[] = [
     id: 'planTable',
     label: '作業台',
     dialogue: 'planTable',
+    opens: 'plan',
     location: 'soheiWorkshop',
     position: { x: 4.5, z: -20.1 },
     range: 2.6,

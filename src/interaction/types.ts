@@ -30,7 +30,7 @@ export interface NpcInteractable extends InteractableBase {
 export interface ObjectInteractable extends InteractableBase {
   readonly kind: 'object';
   /** 調べ終えたときに開く専用画面（結帳など）。 */
-  readonly opens?: 'ledger';
+  readonly opens?: 'ledger' | 'plan';
   /** 案内表示を出す高さ（地面から）。 */
   readonly markerHeight: number;
 }

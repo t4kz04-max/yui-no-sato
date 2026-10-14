@@ -39,6 +39,11 @@ export class World implements WalkableWorld {
   readonly locations: readonly LocationDef[] = LOCATIONS;
   /** カメラの壁抜け防止に使うメッシュ。 */
   readonly cameraBlockers: THREE.Object3D[] = [];
+  /** サエ家の屋根の茅（葺き替えの前後で色を変えるため、他の家と共有しない）。 */
+  private saeThatch: THREE.MeshStandardMaterial[] = [];
+  private readonly freshThatch = new THREE.Color(0xb39a64);
+  private readonly freshThatchEdge = new THREE.Color(0x9c8352);
+  private oldThatch: THREE.Color[] = [];
 
   /** @param extraColliders 配置データ以外の障害物（住民の立ち位置など）。 */
   constructor(extraColliders: readonly Collider[] = []) {
@@ -48,6 +53,13 @@ export class World implements WalkableWorld {
     this.root.updateMatrixWorld(true);
     this.root.traverse((obj) => {
       if (obj.userData.cameraBlocker) this.cameraBlockers.push(obj);
+    });
+  }
+
+  /** サエ家の屋根を、葺き替え前（古い茅）／葺き替え後（新しい茅）の見た目にする。 */
+  setSaeRoofRenewed(renewed: boolean): void {
+    this.saeThatch.forEach((m, i) => {
+      m.color.copy(renewed ? (i === 0 ? this.freshThatchEdge : this.freshThatch) : this.oldThatch[i]!);
     });
   }
 
@@ -86,6 +98,17 @@ export class World implements WalkableWorld {
     obj.rotation.y = b.rotation;
     obj.scale.setScalar(b.scale);
     if (b.location) obj.userData.location = b.location;
+    if (b.id === 'sae') {
+      // 屋根（複数マテリアルのメッシュ）の茅だけ専用のマテリアルにする
+      obj.traverse((o) => {
+        if (o instanceof THREE.Mesh && Array.isArray(o.material)) {
+          const own = (o.material as THREE.MeshStandardMaterial[]).map((m) => m.clone());
+          o.material = own;
+          this.saeThatch = own;
+          this.oldThatch = own.map((m) => m.color.clone());
+        }
+      });
+    }
     return obj;
   }
 }

@@ -75,7 +75,7 @@ describe('結帳の表示内容（過去の記録と現在の状態の区別）'
     const before = buildLedger(new StoryState(STORY_DEFS), LEDGER, src);
     const l1 = before.entries.find((e) => e.id === 'L1')!;
     const isukeItem = l1.items.find((i) => i.id === 'L1-isuke')!;
-    expect(isukeItem).toMatchObject({ from: '伊助家', to: 'サエ家', kind: '人手', settled: false });
+    expect(isukeItem).toMatchObject({ from: '伊助家', to: 'サエ家', kind: '人手', settlement: 'open' });
     expect(Object.keys(isukeItem)).not.toContain('points');
   });
 
@@ -98,6 +98,6 @@ describe('結帳の表示内容（過去の記録と現在の状態の区別）'
     item = buildLedger(story, LEDGER, src).entries[0]!.items.find((i) => i.id === 'L1-isuke')!;
     expect(item.currentStance).toEqual(['伊助：屋根葺き当日の手伝いは「断っている」（当日は手伝えない）']);
     // 過去の記録の内容は変わらない
-    expect(item.settled).toBe(false);
+    expect(item.settlement).toBe('open');
   });
 });

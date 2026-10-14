@@ -7,10 +7,11 @@ import { INTERACTABLES, NPCS, NPC_COLLIDER_RADIUS, npcColliders } from '../src/c
 import { LEDGER } from '../src/content/ledger';
 import { OBJECTIVES, currentObjective } from '../src/content/objectives';
 import { HOUSEHOLDS, STORY_DEFS } from '../src/content/story';
+import { INITIAL_PLAN, OUTCOMES, PLANNING, PLANNING_AVAILABLE, RESPONSE_SUMMARY } from '../src/content/plan';
 import { validateScript } from '../src/dialogue/validate';
 import { InteractionSystem } from '../src/interaction/InteractionSystem';
 import { completionFlag } from '../src/interaction/types';
-import { collectRefs, type Condition, type Effect } from '../src/story/conditions';
+import { collectRefs, evaluate, type Condition, type Effect } from '../src/story/conditions';
 import { StoryState } from '../src/story/StoryState';
 import type { FlagId } from '../src/story/types';
 import { createSave, parseSave } from '../src/save/saveData';
@@ -41,6 +42,10 @@ function collectAll() {
     }
   }
   for (const o of OBJECTIVES) if (o.when) conditions.push(o.when);
+  // 計画を決めたときの効果（結果）もゲーム中に起きる
+  for (const id of Object.keys(OUTCOMES)) effects.push(...PLANNING.outcomeEffects(id));
+  for (const outcome of Object.values(OUTCOMES)) for (const l of outcome.story) if (l.when) conditions.push(l.when);
+  for (const item of PLANNING.items) for (const o of item.options) if (o.when) conditions.push(o.when);
   return { conditions, effects };
 }
 
@@ -191,7 +196,7 @@ describe('目的表示', () => {
     s.set('talked:toki');
     expect(currentObjective(s)).toBe('サエ家を訪ねる');
     s.set('talked:sae');
-    expect(currentObjective(s)).toBe('伊助・宗平・ミネに話を聞く');
+    expect(currentObjective(s)).toBe('伊助に屋根葺きの手伝いを相談する');
   });
 });
 
@@ -275,14 +280,14 @@ describe('仮シナリオの通し確認', () => {
     talk(sys, 'isuke', last);
     let choices: string[] = [];
     talk(sys, 'isuke', (c) => ((choices = [...c]), last(c)));
-    expect(choices.some((c) => c.includes('結帳'))).toBe(false);
+    expect(choices.some((c) => c.includes('十二年前'))).toBe(false);
 
     // 結帳は最初から読める（設計書 G：探索順は固定しない）
     talk(sys, 'ledger');
     expect(story.currentStage('ledger.basics')).toBe('read');
     expect(story.currentStage('isuke.pastHelp')).toBe('onRecord');
 
-    const lines = talk(sys, 'isuke', choose('結帳'));
+    const lines = talk(sys, 'isuke', choose('十二年前'));
     expect(lines.join()).toContain('今年の刈り入れが待ってくれるわけじゃない');
     expect(story.currentStage('isuke.pastHelp')).toBe('isukeView');
     expect(story.consentStatus('isuke', 'roofDay')).toBe('declined');
@@ -336,6 +341,41 @@ describe('取得順序・中断に対する一貫性（無作為な遊び方 300
       if (story.consentHistory(npc).length > 0 && !story.hasMet(npc)) problems.push(`${npc} に会わずに意向が記録された`);
     }
     if (currentObjective(story) === '') problems.push('目的が空');
+
+    // ── 計画 ──
+    const sig = (p: Record<string, string>) => story.planSignature(p);
+    for (const r of story.planResponses()) {
+      // 返事は今の事情と提案内容だけで決まる（規則と一致し、相談が必要な人だけ）
+      const rule = PLANNING.respond(r.npc, r.plan);
+      if (rule.status !== r.status || rule.reason !== r.reason) problems.push(`規則と違う返事 ${r.npc}`);
+      if (!PLANNING.involved(r.plan).includes(r.npc)) problems.push(`相談の必要がない人の返事 ${r.npc}`);
+      if (PLANNING.invalidReason(r.plan) !== null) problems.push('成り立たない案への返事');
+    }
+    const d = story.planDecision();
+    if (d) {
+      // 決定した案は、関係者全員が承諾している（承諾していない住民を承諾済みとして扱わない）
+      for (const npc of PLANNING.involved(d.plan)) {
+        const ok = story.planResponses().some((r) => r.npc === npc && sig(r.plan) === sig(d.plan) && r.status === 'agreed' && r.order < d.order);
+        if (!ok) problems.push(`承諾のない決定 ${npc}`);
+      }
+      if (PLANNING.outcome(d.plan) !== d.outcome) problems.push('結果が案と合わない');
+      if (sig(story.planDraft()!) !== sig(d.plan)) problems.push('決定後に案が変わった');
+      if (story.planResponses().some((r) => r.order > d.order)) problems.push('決定後に返事が増えた');
+      if (story.currentStage('sae.roof') !== 'renewed') problems.push('結果が状態に反映されていない');
+      if ((d.outcome === 'r2') !== story.allPromises().some((p) => p.id === 'saeHelpsIsukeHarvest')) problems.push('約束と結果が合わない');
+    } else if (story.allPromises().length > 0 || story.has('roofing:done')) problems.push('決定前に結果が起きた');
+    // 伊助の「当日の手伝い」の承諾は、刈り入れの後に延ばした結果だけ
+    if (story.consentStatus('isuke', 'roofDay') === 'agreed' && !(d && (d.outcome === 'r3' || d.outcome === 'r3help'))) {
+      problems.push('伊助が承諾していないのに承諾済み');
+    }
+    // 案の選択肢は、選んだ時点で知っていた情報で選べるものだけ（ここでは今知っていることで代用）
+    const draft = story.planDraft();
+    if (draft) {
+      for (const item of PLANNING.items) {
+        const o = item.options.find((x) => x.id === draft[item.id]);
+        if (!o || !evaluate(o.when, story)) problems.push(`知らない情報を前提とした案 ${item.id}`);
+      }
+    }
     return problems;
   }
 
@@ -343,9 +383,27 @@ describe('取得順序・中断に対する一貫性（無作為な遊び方 300
     const rand = createRandom(20261014);
     const reached = new Set<string>();
     let cancels = 0;
+    let planActions = 0;
     for (let run = 0; run < 300; run++) {
       const { story, sys } = newGame();
-      for (let step = 0; step < 40; step++) {
+      for (let step = 0; step < 120; step++) {
+        // 2割の確率で作業台を使う（Game と同じく、知っている情報で選べる選択肢だけを選ぶ）
+        if (rand() < 0.2 && (evaluate(PLANNING_AVAILABLE, story) || story.planPhase() === 'decided')) {
+          planActions++;
+          if (story.planPhase() === 'decided') continue;
+          // 相談の途中なら、たいていは案を変えずに相談を続ける
+          if (story.planPhase() === 'pending' && rand() < 0.7) continue;
+          if (!story.planDraft()) story.setPlanDraft(INITIAL_PLAN);
+          if (story.planPhase() === 'ready' && rand() < 0.4) {
+            story.decidePlan();
+            continue;
+          }
+          const item = PLANNING.items[Math.floor(rand() * PLANNING.items.length)]!;
+          const visible = item.options.filter((o) => evaluate(o.when, story));
+          const option = visible[Math.floor(rand() * visible.length)]!;
+          story.setPlanDraft({ ...story.planDraft()!, [item.id]: option.id });
+          continue;
+        }
         const def = INTERACTABLES[Math.floor(rand() * INTERACTABLES.length)]!;
         sys.updateTarget({ x: def.position.x, z: def.position.z - 1, heading: 0 });
         if (!sys.interact()) continue;
@@ -359,12 +417,19 @@ describe('取得順序・中断に対する一貫性（無作為な遊び方 300
             break;
           }
           const view = sys.view!;
-          if (view.choices.length > 0) sys.choose(Math.floor(rand() * view.choices.length));
+          if (view.choices.length > 0) {
+            // 案の相談の選択肢があれば、半分の確率でそれを選ぶ
+            const consult = view.choices.findIndex((c) => c.text.includes('案'));
+            sys.choose(consult >= 0 && rand() < 0.5 ? consult : Math.floor(rand() * view.choices.length));
+          }
           else sys.advance();
         }
       }
       expect(checkInvariants(story), `run ${run}`).toEqual([]);
       story.allLearned().forEach((l) => reached.add(`${l.topic}/${l.stage}`));
+      const outcome = story.outcome();
+      if (outcome) reached.add(`outcome:${outcome}`);
+      for (const r of story.planResponses()) reached.add(`reason:${r.npc}/${r.reason}`);
       for (const npc of STORY_DEFS.npcs) story.consentHistory(npc).forEach((c) => reached.add(`${npc}:${c.request}=${c.status}`));
 
       // 保存 → 読込で同じ状態に戻る
@@ -385,5 +450,11 @@ describe('取得順序・中断に対する一貫性（無作為な遊び方 300
       expect(reached.has(c), c).toBe(true);
     }
     expect(cancels).toBeGreaterThan(100);
+    expect(planActions).toBeGreaterThan(100);
+    // 4 つの結果すべてと、すべての返事の理由に、無作為な遊び方で到達している
+    for (const o of Object.keys(OUTCOMES)) expect(reached.has(`outcome:${o}`), o).toBe(true);
+    for (const r of Object.keys(RESPONSE_SUMMARY)) {
+      expect([...reached].some((x) => x.startsWith('reason:') && x.endsWith(`/${r}`)), r).toBe(true);
+    }
   });
 });

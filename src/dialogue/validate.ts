@@ -26,6 +26,10 @@ export function validateScript(script: DialogueScript, knownSpeakers: ReadonlySe
       errors.push(at(`場面 ${id} の話し手 ${node.speaker} が未登録`));
     }
     if (node.next !== undefined && node.choices) errors.push(at(`場面 ${id} に next と choices の両方がある`));
+    if (node.branches && node.choices) errors.push(at(`場面 ${id} に branches と choices の両方がある`));
+    for (const b of node.branches ?? []) {
+      if (!exists(b.next)) errors.push(at(`場面 ${id} の分岐先 ${b.next} が存在しない`));
+    }
     if (node.next !== undefined && !exists(node.next)) errors.push(at(`場面 ${id} の next ${node.next} が存在しない`));
     if (node.choices) {
       if (node.choices.length === 0) errors.push(at(`場面 ${id} の選択肢が空`));
@@ -63,7 +67,8 @@ export function validateScript(script: DialogueScript, knownSpeakers: ReadonlySe
       const ends =
         node.choices !== undefined
           ? node.choices.some((c) => !c.when && (c.next === undefined || canEnd.has(c.next)))
-          : node.next === undefined || canEnd.has(node.next);
+          : (node.next === undefined || canEnd.has(node.next)) &&
+            (node.branches ?? []).every((b) => canEnd.has(b.next));
       if (ends) {
         canEnd.add(id);
         changed = true;
@@ -78,6 +83,7 @@ export function validateScript(script: DialogueScript, knownSpeakers: ReadonlySe
 function successors(node: DialogueScript['nodes'][string]): NodeId[] {
   const list: NodeId[] = [];
   if (node.next !== undefined) list.push(node.next);
+  for (const b of node.branches ?? []) list.push(b.next);
   for (const c of node.choices ?? []) if (c.next !== undefined) list.push(c.next);
   return list;
 }

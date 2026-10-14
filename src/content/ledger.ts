@@ -14,14 +14,22 @@ export const LEDGER_KIND_LABEL: Record<LedgerItemKind, string> = {
   material: '資材',
 };
 
+export type LedgerSettlement = 'open' | 'settled' | 'none';
+
+export const SETTLEMENT_LABEL: Record<LedgerSettlement, string> = {
+  open: '返し まだ',
+  settled: '返し 済',
+  none: '取り決めなし',
+};
+
 export interface LedgerItem {
   readonly id: string;
   readonly from: HouseholdId;
   readonly to: HouseholdId;
   readonly kind: LedgerItemKind;
   readonly detail: string;
-  /** 返しが済んだか（open＝まだ）。 */
-  readonly settled: boolean;
+  /** 返しの状態。open＝まだ、settled＝済、none＝返しの取り決めが記されていない。 */
+  readonly settlement: LedgerSettlement;
   readonly settlementNote: string;
 }
 
@@ -52,7 +60,7 @@ export const LEDGER: readonly LedgerEntry[] = [
         to: 'sae',
         kind: 'labor',
         detail: '二人・二日（茅運び、下の仕事）',
-        settled: false,
+        settlement: 'open',
         settlementNote: 'まだ返していない。伊助家の屋根葺きの折に返す。',
       },
       {
@@ -61,7 +69,7 @@ export const LEDGER: readonly LedgerEntry[] = [
         to: 'sae',
         kind: 'material',
         detail: '茅 三十束',
-        settled: true,
+        settlement: 'settled',
         settlementNote: '七年前、ミネ家の屋根葺きに茅三十束を出して返した（L2）。',
       },
       {
@@ -70,7 +78,7 @@ export const LEDGER: readonly LedgerEntry[] = [
         to: 'sae',
         kind: 'labor',
         detail: '一人（屋根の上の段取り）',
-        settled: true,
+        settlement: 'settled',
         settlementNote: '宗平の作業小屋の普請に一人出して返した。',
       },
     ],
@@ -87,7 +95,7 @@ export const LEDGER: readonly LedgerEntry[] = [
         to: 'mine',
         kind: 'material',
         detail: '茅 三十束（十二年前に借りた分の返し）',
-        settled: true,
+        settlement: 'settled',
         settlementNote: 'これで十二年前の茅の借りは返した。',
       },
     ],

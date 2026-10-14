@@ -168,6 +168,12 @@ export class NotebookView {
       if (c.history.length > 0) line.append(el('span', 'notebook-muted', ` 以前：${c.history.join(' → ')}`));
       stance.append(line);
     });
+    if (p.plan) {
+      const line = el('div', 'notebook-stance-line');
+      line.append(el('span', 'notebook-stance-request', '今の計画案への返事'), el('span', 'stance-chip', p.plan.status));
+      if (p.plan.summary) line.append(el('span', 'notebook-muted', `（${p.plan.summary}）`));
+      stance.append(line);
+    }
     card.append(stance);
 
     const facts = el('div', 'notebook-person-topics');

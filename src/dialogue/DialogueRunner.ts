@@ -67,7 +67,8 @@ export class DialogueRunner {
       return true;
     }
     if (this.choices.length > 0) return false;
-    this.go(node.next);
+    const branch = node.branches?.find((b) => evaluate(b.when, this.state));
+    this.go(branch ? branch.next : node.next);
     return true;
   }
 

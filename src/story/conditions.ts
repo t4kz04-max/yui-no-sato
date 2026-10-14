@@ -1,4 +1,4 @@
-import type { ConsentStatus, FlagId, HouseholdId, NpcId, RequestId, StageId, TopicId } from './types';
+import type { ConsentStatus, FlagId, HouseholdId, NpcId, PlanPhase, RequestId, StageId, TopicId } from './types';
 
 export type { FlagId } from './types';
 
@@ -23,7 +23,15 @@ export type Condition =
    */
   | { readonly topic: TopicId; readonly atLeast?: StageId; readonly below?: StageId }
   /** 住民の現在の意向。'none' はまだ聞いていない。 */
-  | { readonly consentOf: NpcId; readonly request: RequestId; readonly is: readonly (ConsentStatus | 'none')[] };
+  | { readonly consentOf: NpcId; readonly request: RequestId; readonly is: readonly (ConsentStatus | 'none')[] }
+  /** 計画の進み具合。 */
+  | { readonly planPhase: readonly PlanPhase[] }
+  /** 今の案について、この住民にまだ相談していない（相談が必要な人に限る）。 */
+  | { readonly planPending: NpcId }
+  /** 今の案に対するこの住民の返事の理由。 */
+  | { readonly planReason: NpcId; readonly is: readonly string[] }
+  /** 決定した計画の結果。 */
+  | { readonly outcome: readonly string[] };
 
 export type Effect =
   | { readonly type: 'setFlag'; readonly flag: FlagId }
@@ -35,6 +43,8 @@ export type Effect =
       readonly status: ConsentStatus;
       readonly note?: string;
     }
+  /** 今の案を住民に相談し、返事を記録する。 */
+  | { readonly type: 'consultPlan'; readonly npc: NpcId }
   | {
       readonly type: 'recordPromise';
       readonly id: string;
@@ -51,6 +61,12 @@ export interface StoryQuery {
   /** 段階の順位（定義にない段階は例外）。 */
   stageRank(topic: TopicId, stage: StageId): number;
   consentStatus(npc: NpcId, request: RequestId): ConsentStatus | undefined;
+  planPhase(): PlanPhase;
+  /** 今の案について未相談か（相談が必要な人で、まだ返事がない）。 */
+  isPlanPending(npc: NpcId): boolean;
+  /** 今の案に対する返事の理由。 */
+  planReason(npc: NpcId): string | undefined;
+  outcome(): string | undefined;
 }
 
 /** 条件なし（undefined）は常に成立する。 */
@@ -67,6 +83,16 @@ export function evaluate(condition: Condition | undefined, state: StoryQuery): b
     if (condition.atLeast === undefined && condition.below === undefined) return rank >= 0;
     return true;
   }
+  if ('planPhase' in condition) return condition.planPhase.includes(state.planPhase());
+  if ('planPending' in condition) return state.isPlanPending(condition.planPending);
+  if ('planReason' in condition) {
+    const reason = state.planReason(condition.planReason);
+    return reason !== undefined && condition.is.includes(reason);
+  }
+  if ('outcome' in condition) {
+    const outcome = state.outcome();
+    return outcome !== undefined && condition.outcome.includes(outcome);
+  }
   const status = state.consentStatus(condition.consentOf, condition.request) ?? 'none';
   return condition.is.includes(status);
 }
@@ -76,10 +102,13 @@ export interface ConditionRefs {
   flags: FlagId[];
   topics: Array<{ topic: TopicId; stage?: StageId }>;
   consents: Array<{ npc: NpcId; request: RequestId }>;
+  /** 計画の理由・結果として参照した ID。 */
+  planReasons: Array<{ npc: NpcId; reason: string }>;
+  outcomes: string[];
 }
 
 export function collectRefs(condition: Condition | undefined, into?: ConditionRefs): ConditionRefs {
-  const refs = into ?? { flags: [], topics: [], consents: [] };
+  const refs = into ?? { flags: [], topics: [], consents: [], planReasons: [], outcomes: [] };
   if (!condition) return refs;
   if ('flag' in condition) refs.flags.push(condition.flag);
   else if ('not' in condition) collectRefs(condition.not, refs);
@@ -89,7 +118,10 @@ export function collectRefs(condition: Condition | undefined, into?: ConditionRe
     refs.topics.push({ topic: condition.topic });
     if (condition.atLeast) refs.topics.push({ topic: condition.topic, stage: condition.atLeast });
     if (condition.below) refs.topics.push({ topic: condition.topic, stage: condition.below });
-  } else refs.consents.push({ npc: condition.consentOf, request: condition.request });
+  } else if ('planReason' in condition) {
+    condition.is.forEach((reason) => refs.planReasons.push({ npc: condition.planReason, reason }));
+  } else if ('outcome' in condition) refs.outcomes.push(...condition.outcome);
+  else if ('consentOf' in condition) refs.consents.push({ npc: condition.consentOf, request: condition.request });
   return refs;
 }
 
@@ -116,3 +148,8 @@ export const setFlag = (f: FlagId): Effect => ({ type: 'setFlag', flag: f });
 export const learn = (topic: TopicId, stage: StageId): Effect => ({ type: 'learn', topic, stage });
 export const setConsent = (npc: NpcId, request: RequestId, status: ConsentStatus, note?: string): Effect =>
   note === undefined ? { type: 'setConsent', npc, request, status } : { type: 'setConsent', npc, request, status, note };
+export const planPhase = (...phases: PlanPhase[]): Condition => ({ planPhase: phases });
+export const planPending = (npc: NpcId): Condition => ({ planPending: npc });
+export const planReason = (npc: NpcId, ...is: string[]): Condition => ({ planReason: npc, is });
+export const outcomeIs = (...outcomes: string[]): Condition => ({ outcome: outcomes });
+export const consultPlan = (npc: NpcId): Effect => ({ type: 'consultPlan', npc });

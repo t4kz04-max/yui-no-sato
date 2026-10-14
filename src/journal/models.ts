@@ -1,6 +1,6 @@
 import type { CharacterDef } from '../content/characters';
 import type { LedgerEntry } from '../content/ledger';
-import { LEDGER_KIND_LABEL } from '../content/ledger';
+import { LEDGER_KIND_LABEL, SETTLEMENT_LABEL, type LedgerSettlement } from '../content/ledger';
 import type { StoryState } from '../story/StoryState';
 import { CONSENT_LABEL, type ConsentStatus, type HouseholdId, type NpcId, type TopicCategory, type TopicId } from '../story/types';
 
@@ -40,6 +40,8 @@ export interface NotebookPerson {
   readonly id: NpcId;
   readonly name: string;
   readonly role: string;
+  /** 今の計画案への返事（相談が必要な人だけ）。 */
+  readonly plan?: { readonly status: string; readonly summary?: string };
   readonly consents: readonly NotebookConsent[];
   readonly topics: readonly NotebookTopic[];
 }
@@ -62,6 +64,8 @@ export interface NotebookModel {
 
 export interface JournalSources {
   readonly characters: Readonly<Record<string, CharacterDef>>;
+  /** 計画への返事の要旨（理由 ID → 文）。 */
+  readonly planSummaries?: Readonly<Record<string, string>>;
   readonly households: Readonly<Record<HouseholdId, { readonly name: string; readonly person?: string }>>;
 }
 
@@ -114,8 +118,14 @@ export function buildNotebook(story: StoryState, src: JournalSources): NotebookM
     .filter((id) => story.hasMet(id))
     .map((id) => {
       const c = src.characters[id];
+      const involved = story.planInvolved().includes(id) && story.planPhase() !== 'decided';
+      const response = involved ? story.planResponse(id) : undefined;
+      const summary = response ? src.planSummaries?.[response.reason] : undefined;
       return {
         id,
+        ...(involved
+          ? { plan: { status: response ? CONSENT_LABEL[response.status] : 'まだ相談していない', ...(summary ? { summary } : {}) } }
+          : {}),
         name: c?.name ?? id,
         role: c?.role ?? '',
         consents: consentsOf(story, id),
@@ -154,7 +164,8 @@ export interface LedgerItemView {
   readonly to: string;
   readonly kind: string;
   readonly detail: string;
-  readonly settled: boolean;
+  readonly settlement: LedgerSettlement;
+  readonly settlementLabel: string;
   readonly settlementNote: string;
   /** 関係する住民の現在の意向（手帳より）。過去の記録とは別に表示する。 */
   readonly currentStance: readonly string[];
@@ -194,7 +205,8 @@ export function buildLedger(story: StoryState, ledger: readonly LedgerEntry[], s
       to: name(i.to),
       kind: LEDGER_KIND_LABEL[i.kind],
       detail: i.detail,
-      settled: i.settled,
+      settlement: i.settlement,
+      settlementLabel: SETTLEMENT_LABEL[i.settlement],
       settlementNote: i.settlementNote,
       currentStance: stanceOf(i.from),
     })),

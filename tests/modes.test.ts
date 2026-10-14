@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { allowsExploration, nextMode, type UiAction, type UiMode } from '../src/game/modes';
 
-const MODES: UiMode[] = ['explore', 'dialogue', 'notebook', 'ledger', 'pause', 'notice'];
+const MODES: UiMode[] = ['explore', 'dialogue', 'notebook', 'ledger', 'plan', 'result', 'pause', 'notice'];
 const ACTIONS: UiAction[] = [
   'esc',
   'tab',
   'dialogueStarted',
   'dialogueEnded',
   'openLedger',
+  'openPlan',
+  'openResult',
   'openNotebook',
   'openNotice',
   'close',
@@ -35,6 +37,17 @@ describe('画面の状態遷移（Esc・Tab の競合と進行不能の防止）
     expect(nextMode('ledger', 'tab')).toBe('notebook');
     expect(nextMode('pause', 'esc')).toBe('explore');
     expect(nextMode('pause', 'openNotebook')).toBe('notebook');
+  });
+
+  it('作業台：Esc で閉じ、Tab で手帳と見比べられる。決定の確認はお知らせで行う', () => {
+    expect(nextMode('explore', 'openPlan')).toBe('plan');
+    expect(nextMode('plan', 'esc')).toBe('explore');
+    expect(nextMode('plan', 'tab')).toBe('notebook');
+    expect(nextMode('plan', 'openNotice')).toBe('notice');
+    expect(nextMode('plan', 'dialogueStarted')).toBe('plan');
+    expect(nextMode('explore', 'openResult')).toBe('result');
+    expect(nextMode('result', 'close')).toBe('explore');
+    expect(nextMode('result', 'tab')).toBe('result');
   });
 
   it('お知らせは Esc・Tab で閉じない（回答を選んだときだけ閉じる）', () => {

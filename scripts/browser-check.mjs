@@ -3,6 +3,7 @@
  * - Phase 0：起動・移動・衝突・カメラ・ズーム・リサイズ・コンソールエラー
  * - Phase 1（[P1]）：案内表示、会話の開始・送り・選択・終了、会話中の操作制御、調査、状態による選択肢の変化
  * - Phase 2（[P2]）：手帳、結帳、ポーズ、会話の中断、記録（保存・続きから・壊れた記録・やり直し）
+ * - Phase 3（[P3]）：作業台で案を作る・変える、住民との相談、見直し、決定、結果、結果の後の村、記録の復元
  *
  *   npm run test:browser
  *
@@ -38,7 +39,12 @@ page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
 page.on('requestfailed', (r) => logs.push(`[requestfailed] ${r.url()}`));
 
 const results = [];
-const check = (name, ok, detail = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  — ' + detail : ''}`);
+const check = (name, ok, detail = '') => {
+  const line = `${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  — ' + detail : ''}`;
+  results.push(line);
+  // 途中で止まったときに、どこまで進んだか分かるように逐次出す
+  if (process.env.VERBOSE) console.log(line);
+};
 const state = () =>
   page.evaluate(() => {
     const g = window.__yui;
@@ -366,13 +372,15 @@ check('[P2] 情報を得ると「手帳に新しい記録」が表示される',
 // 手帳（Tab）
 const n1 = await press2('Tab', (s) => s.notebook);
 check('[P2] Tab で手帳が開く', n1.mode === 'notebook' && n1.notebook);
+// 区分の切り替え：毎回表示が変わる順に押す（低 FPS では、同じフレームに2つのキーが入ると後の方が勝つため）
+const n3 = await press2('Digit1', (s) => s.activeTab === 'people');
+check('[P2] 「人物」に会った住民と現在の意向が載る', n3.activeTab === 'people' && /伊助/.test(n3.notebookText) && /断っている/.test(n3.notebookText) && /トキ/.test(n3.notebookText) && !/ミネ/.test(n3.notebookText), n3.notebookText.slice(0, 120));
 const n2 = await press2('Digit2', (s) => s.activeTab === 'known');
 check('[P2] 「分かったこと」に伊助の事情が載り、前の記述が「これまでの記録」に残る',
-  /刈り入れと重なる/.test(n2.notebookText) && /これまでの記録（1）/.test(n2.notebookText), n2.notebookText.slice(0, 120));
-const n3 = await press2('Digit1', (s) => s.activeTab === 'people');
-check('[P2] 「人物」に会った住民と現在の意向が載る', /伊助/.test(n3.notebookText) && /断っている/.test(n3.notebookText) && /トキ/.test(n3.notebookText) && !/ミネ/.test(n3.notebookText), n3.notebookText.slice(0, 120));
-const n4 = await press2('ArrowRight', (s) => s.activeTab === 'known');
-check('[P2] ←→ で区分を切り替えられる', n4.activeTab === 'known');
+  n2.activeTab === 'known' && /刈り入れと重なる/.test(n2.notebookText) && /これまでの記録（1）/.test(n2.notebookText), n2.notebookText.slice(0, 120));
+const n4 = await press2('ArrowRight', (s) => s.activeTab === 'unconfirmed');
+check('[P2] ←→ で区分を切り替えられる', n4.activeTab === 'unconfirmed');
+await press2('ArrowLeft', (s) => s.activeTab === 'known');
 await page.screenshot({ path: `${OUT}/shot-20-notebook.png` });
 const nbPos0 = await state();
 await page.keyboard.down('KeyW');
@@ -425,8 +433,8 @@ for (let i = 0; i < 10 && i1.choices.length === 0; i++) {
   const before = i1.text;
   i1 = await press('KeyE', (u) => u.text !== before || u.choices.length > 0, 3000);
 }
-check('[P2] 結帳を読んだ後、伊助に新しい選択肢が出る', i1.choices.some((c) => /結帳/.test(c.text)), i1.choices.map((c) => c.text).join(' / '));
-await finishDialogue((u) => `Digit${u.choices.findIndex((c) => /結帳/.test(c.text)) + 1}`);
+check('[P2] 結帳を読んだ後、伊助に新しい選択肢が出る', i1.choices.some((c) => /十二年前/.test(c.text)), i1.choices.map((c) => c.text).join(' / '));
+await finishDialogue((u) => `Digit${Math.max(0, u.choices.findIndex((c) => /十二年前/.test(c.text))) + 1}`);
 const i2 = await g2();
 check('[P2] 過去の協力について聞くと手帳が更新されるが、現在の意向は変わらない',
   i2.learned.includes('isuke.pastHelp/isukeView') && /断っている/.test(await page.evaluate(() => window.__yui.story.consentStatus('isuke', 'roofDay') === 'declined' ? '断っている' : '')));
@@ -476,6 +484,161 @@ await waitFor2((s) => s.notice);
 await page.click('.notice-layer .menu-item[data-id="yes"]');
 const nw = await waitFor2((s) => !s.notice);
 check('[P2] 「最初からやり直す」で状態が初期化される', nw.mode === 'explore' && nw.learned.length === 0 && nw.objective === '広場にいるトキに話しかける');
+
+// ───────── Phase 3：作業台・相談・見直し・結果 ─────────
+// 情報集めの部分は Phase 1・2 の確認と単体テストで確かめているので、ここでは状態を直接用意する。
+await page.evaluate(() => {
+  const s = window.__yui.story;
+  s.markMet('sae');
+  s.markMet('isuke');
+  s.set('talked:sae');
+  s.set('talked:isuke');
+  s.learn('sae.schedule', 'needsHelp');
+  s.learn('isuke.availability', 'declined');
+  s.learn('isuke.field', 'harvesting');
+  s.learn('isuke.availability', 'harvest');
+  s.learn('isuke.field', 'progress');
+  s.learn('isuke.availability', 'dayBefore');
+});
+const p3 = () =>
+  page.evaluate(() => {
+    const g = window.__yui;
+    const q = (s) => document.querySelector(s);
+    const vis = (s) => { const e = q(s); return !!e && !e.hidden; };
+    return {
+      mode: g.mode,
+      phase: g.story.planPhase(),
+      outcome: g.story.outcome() ?? null,
+      draft: g.story.planDraft(),
+      plan: vis('.plan-layer'),
+      options: [...document.querySelectorAll('.plan-item')].map((i) => ({
+        item: i.dataset.item,
+        options: [...i.querySelectorAll('.plan-option')].map((b) => b.dataset.option),
+        selected: i.querySelector('.plan-option.is-selected')?.dataset.option ?? null,
+      })),
+      responses: [...document.querySelectorAll('.plan-response')].map((r) => `${r.dataset.npc}:${r.querySelector('.plan-response-chip')?.textContent}`),
+      decideDisabled: q('.plan-decide')?.disabled ?? null,
+      result: vis('.result-layer'),
+      resultTitle: q('.result-title')?.textContent ?? '',
+      notice: vis('.notice-layer'),
+      objective: q('.hud-objective-text')?.textContent ?? '',
+      roofColor: g.world.saeThatch?.[1]?.color.getHex() ?? null,
+    };
+  });
+const waitP3 = async (cond, timeoutMs = 8000) => {
+  const t0 = Date.now();
+  let s = await p3();
+  while (!cond(s) && Date.now() - t0 < timeoutMs) { await wait(100); s = await p3(); }
+  return s;
+};
+/**
+ * 表示中の選択肢から、指定した文言のどれかを含むものを選ぶ（なければ最後＝切り上げる選択肢）。
+ * 状態を持たない：選択肢が出た直後のキー入力は受け付けられないため、同じ画面で押し直すことがある。
+ */
+const pickText = (...texts) => (u) => {
+  for (const want of texts) {
+    const idx = u.choices.findIndex((c) => c.text.includes(want));
+    if (idx >= 0) return `Digit${idx + 1}`;
+  }
+  return `Digit${u.choices.length}`;
+};
+const talkTo = async (id, x, z, heading, pick) => {
+  await place(x, z, heading);
+  await waitFor((u) => u.target === id);
+  await press('KeyE', (u) => u.dialogueVisible);
+  return finishDialogue(pick);
+};
+const openPlan = async () => {
+  await place(4.5, -18.6, Math.PI);
+  await waitFor((u) => u.target === 'planTable');
+  await press('KeyE', (u) => u.dialogueVisible);
+  await finishDialogue();
+  return waitP3((s) => s.plan);
+};
+const roofBefore = (await p3()).roofColor;
+
+const q1 = await openPlan();
+check('[P3] 作業台を調べると段取りの画面が開き、サエの元の案が広げてある', q1.mode === 'plan' && q1.plan && q1.draft?.date === 'keep' && q1.draft?.isuke === 'dayOf', JSON.stringify(q1.draft));
+check('[P3] 知っている情報に応じて案の選択肢が出ている', JSON.stringify(q1.options.map((o) => o.options)) === JSON.stringify([['keep', 'afterHarvest'], ['none', 'dayOf', 'dayBefore'], ['none', 'harvestHelp']]), JSON.stringify(q1.options.map((o) => o.options)));
+check('[P3] 関係する人の返事は「まだ相談していない」で、決定できない', q1.responses.length === 2 && q1.responses.every((r) => /まだ相談していない/.test(r)) && q1.decideDisabled === true, q1.responses.join(' / '));
+await page.click('.plan-item[data-item="isuke"] .plan-option[data-option="dayBefore"]');
+const q2 = await waitP3((s) => s.draft?.isuke === 'dayBefore');
+check('[P3] クリックで案を変えられる', q2.options.find((o) => o.item === 'isuke')?.selected === 'dayBefore');
+await page.screenshot({ path: `${OUT}/shot-30-plan.png` });
+await page.keyboard.press('Escape');
+await waitP3((s) => !s.plan);
+
+// 伊助に相談 → 条件付き
+await talkTo('isuke', 33.5, 8.1, Math.PI, pickText('作業台でまとめた案', 'この案で手伝って'));
+const q3 = await p3();
+check('[P3] 伊助と話して相談すると返事が記録され、見直しを促される', q3.phase === 'revise' && /見直す/.test(q3.objective), `${q3.phase} / ${q3.objective}`);
+
+// 見直し：刈り入れの手伝いを申し出る
+const q4 = await openPlan();
+check('[P3] 作業台に伊助の「条件付き」の返事が出る', q4.responses.some((r) => r.startsWith('isuke:') && /条件付き/.test(r)), q4.responses.join(' / '));
+await page.click('.plan-item[data-item="offer"] .plan-option[data-option="harvestHelp"]');
+const q5 = await waitP3((s) => s.draft?.offer === 'harvestHelp');
+check('[P3] 案を変えると、返事は「まだ相談していない」に戻る', q5.phase === 'pending' && q5.responses.every((r) => /まだ相談していない/.test(r)), q5.responses.join(' / '));
+await page.keyboard.press('Escape');
+await waitP3((s) => !s.plan);
+await talkTo('isuke', 33.5, 8.1, Math.PI, pickText('作業台でまとめた案', 'この案で手伝って'));
+await talkTo('sae', 3.4, 12.4, Math.PI, pickText('作業台でまとめた案', 'この案でいいですか'));
+const q6 = await p3();
+check('[P3] サエと伊助が承諾すると、計画を決められる状態になる', q6.phase === 'ready' && /決める/.test(q6.objective), `${q6.phase} / ${q6.objective}`);
+
+// 決定 → 確認 → 結果
+const q7 = await openPlan();
+check('[P3] 全員が承諾した案では「この案で決める」が押せる', q7.decideDisabled === false);
+await page.click('.plan-decide');
+await waitP3((s) => s.notice);
+await page.screenshot({ path: `${OUT}/shot-31-confirm.png` });
+await page.click('.notice-layer .menu-item[data-id="yes"]');
+const q8 = await waitP3((s) => s.result);
+check('[P3] 決めると結果画面が出る（前日準備の分担）', q8.result && q8.outcome === 'r2' && /前日の準備を分け合って/.test(q8.resultTitle), q8.resultTitle);
+await page.screenshot({ path: `${OUT}/shot-32-result.png` });
+await page.keyboard.press('Enter');
+const q9 = await waitP3((s) => !s.result);
+check('[P3] 結果を閉じると村に戻り、屋根の見た目が葺き替え後に変わる', q9.mode === 'explore' && q9.roofColor !== roofBefore && q9.roofColor === 0xb39a64, `${roofBefore?.toString(16)} → ${q9.roofColor?.toString(16)}`);
+await page.evaluate(() => { const g = window.__yui; g.player.x = 0; g.player.z = 22; const o = g.cameraRig.orbit; o.yaw = o.targetYaw = Math.PI; o.pitch = o.targetPitch = 0.35; o.distance = o.targetDistance = 18; });
+await wait(1200);
+await page.screenshot({ path: `${OUT}/shot-33-roof-renewed.png` });
+
+// 結果の後の村
+const e1 = await talkTo('isuke', 33.5, 8.1, Math.PI);
+check('[P3] 結果の後は伊助の台詞が変わる', !e1.active);
+const e1text = await page.evaluate(() => window.__yui.story.outcome());
+check('[P3] 結果は状態として残る', e1text === 'r2');
+await place(5.8, 12.0, Math.PI);
+await waitFor((u) => u.target === 'ledger');
+await press('KeyE', (u) => u.dialogueVisible);
+await finishDialogue();
+const lg = await waitFor2((s) => s.ledger);
+check('[P3] 結帳に今年の記録と新しい約束が書き加えられる', /今年の秋/.test(lg.ledgerText) && /前日の半日/.test(lg.ledgerText) && /刈り入れに人手を出す/.test(lg.ledgerText));
+await page.screenshot({ path: `${OUT}/shot-34-ledger-after.png` });
+await press2('Escape', (s) => !s.ledger);
+const q10 = await openPlan();
+check('[P3] 決定後の作業台は閲覧のみ（案を変えられない）', q10.plan && q10.decideDisabled !== false && (await page.evaluate(() => document.querySelectorAll('.plan-option:not(:disabled)').length)) === 3);
+await page.click('.plan-item[data-item="date"] .plan-option[data-option="afterHarvest"]').catch(() => {});
+const q11 = await p3();
+check('[P3] 決定後にクリックしても案は変わらない', q11.draft?.date === 'keep' && q11.outcome === 'r2');
+await page.keyboard.press('Escape');
+await waitP3((s) => !s.plan);
+
+// 記録 → 再読み込み → 続きから で、計画と結果が戻る
+await page.keyboard.press('Escape');
+await waitFor2((s) => s.pause);
+await page.click('.pause-layer .menu-item[data-id="save"]');
+await waitFor2((s) => /記録しました/.test(s.pauseStatus));
+await press2('Escape', (s) => !s.pause);
+await page.reload({ waitUntil: 'networkidle0' });
+await wait(2500);
+await waitFor2((s) => s.notice);
+await page.click('.notice-layer .menu-item[data-id="continue"]');
+const r3 = await waitP3((s) => !s.notice);
+const promises = await page.evaluate(() => window.__yui.story.allPromises().map((p) => p.id));
+check('[P3] 再読み込み後も、決めた計画・結果・約束・屋根の見た目が戻る',
+  r3.outcome === 'r2' && r3.phase === 'decided' && promises.includes('saeHelpsIsukeHarvest') && r3.roofColor === 0xb39a64,
+  `${r3.outcome} / ${promises.join(',')} / ${r3.roofColor?.toString(16)}`);
 
 // F3 デバッグ表示
 await page.keyboard.press('F3');
