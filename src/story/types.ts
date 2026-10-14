@@ -73,6 +73,8 @@ export interface StoryDefinitions {
  */
 export type Chapter = 'ch1' | 'roofDay' | 'ch3' | 'end';
 export const CHAPTERS: readonly Chapter[] = ['ch1', 'roofDay', 'ch3', 'end'];
+/** 章の名前（タイトル画面の「前回の記録」などに出す。Phase 6）。 */
+export const CHAPTER_LABEL: Record<Chapter, string> = { ch1: '屋根葺きの相談', roofDay: '屋根葺きの日', ch3: '三年後の秋（第3幕）', end: 'エンディングの後' };
 
 /** 計画の種類（例：roof＝サエ家の屋根葺き、isukeRoof＝伊助家の屋根葺き）。 */
 export type PlanId = string;

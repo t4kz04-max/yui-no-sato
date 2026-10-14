@@ -1420,3 +1420,551 @@ summary {
   pointer-events: none;
   z-index: 50;
 }
+
+/* ═════════ Phase 6：タイトル・設定・記録・時間経過・手引き・ひと言 ═════════ */
+
+/* ローディング（index.html。村を組み立てる間） */
+#loading {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-content: center;
+  gap: 12px;
+  text-align: center;
+  background: #15120e;
+  color: var(--hud-text);
+  transition: opacity 0.5s ease-out;
+}
+
+#loading.is-done {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.loading-title {
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  color: var(--hud-accent);
+}
+
+.loading-text {
+  font-size: var(--fs-m);
+  color: var(--hud-sub);
+}
+
+/* タイトル・時間経過・短い演出の間は、探索用の表示をすべて隠す */
+#hud.is-title .hud-title,
+#hud.is-title .hud-right,
+#hud.is-title .hud-help,
+#hud.is-title .hud-area,
+#hud.is-title .hud-hint,
+#hud.is-title .interaction-prompt {
+  display: none;
+}
+
+/* タイトル画面：背景の村が見えるよう、左側にまとめる */
+.title-layer {
+  place-items: center start;
+  padding: 24px clamp(16px, 6vw, 80px);
+  background: linear-gradient(90deg, rgba(14, 11, 8, 0.82) 0%, rgba(14, 11, 8, 0.55) 45%, rgba(14, 11, 8, 0) 75%);
+}
+
+.title-panel {
+  width: min(460px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+
+.title-logo {
+  margin-bottom: 10px;
+}
+
+.title-main {
+  font-size: clamp(40px, 6vh, 56px);
+  font-weight: 700;
+  letter-spacing: 0.25em;
+  color: var(--hud-accent);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
+}
+
+.title-ruby {
+  font-size: var(--fs-s);
+  letter-spacing: 0.2em;
+  color: var(--hud-sub);
+}
+
+.title-lead {
+  margin: 0 0 18px;
+  white-space: pre-line;
+  font-size: var(--fs-m);
+  line-height: 1.7;
+}
+
+.title-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.title-item {
+  padding: 10px 18px;
+  font-size: var(--fs-l);
+  text-align: left;
+  color: var(--hud-text);
+  background: rgba(20, 16, 12, 0.6);
+  border: 1px solid rgba(255, 240, 220, 0.18);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.title-item.is-selected {
+  background: rgba(78, 60, 36, 0.95);
+  border-color: var(--hud-accent);
+}
+
+.title-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.title-status {
+  margin-top: 12px;
+  font-size: var(--fs-s);
+  color: var(--hud-sub);
+  line-height: 1.6;
+}
+
+.title-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 18px;
+  font-size: var(--fs-s);
+  color: var(--hud-sub);
+}
+
+.title-control kbd {
+  margin-right: 6px;
+}
+
+.title-version {
+  margin-top: 12px;
+  font-size: 14px;
+  color: rgba(216, 204, 184, 0.7);
+}
+
+.title-controls kbd,
+.hud-hint kbd {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 1px 7px;
+  font: inherit;
+  font-size: 0.9em;
+  text-align: center;
+  color: var(--hud-text);
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 240, 220, 0.35);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+}
+
+/* ポーズ：項目が増えたので、低い画面では二列にする（文字は小さくしない） */
+.pause-layer .menu-item {
+  padding: 9px 16px;
+}
+
+@media (max-height: 760px) {
+  .pause-layer .menu-panel {
+    width: min(760px, calc(100vw - 32px));
+  }
+  .pause-layer .menu-items {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+/* 設定 */
+.settings-layer {
+  background: rgba(10, 8, 6, 0.7);
+}
+
+.settings-panel {
+  width: min(680px, calc(100vw - 32px));
+  max-height: var(--panel-h);
+  overflow-y: auto;
+  padding: 20px 24px 16px;
+  background: linear-gradient(rgba(36, 30, 24, 0.98), rgba(26, 22, 18, 0.98));
+  border: 1px solid rgba(255, 240, 220, 0.2);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+}
+
+.settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.settings-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px 14px;
+  padding: 7px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+
+.settings-row.is-slider {
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 220px) 4.5em;
+}
+
+.settings-row.is-selected {
+  background: rgba(78, 60, 36, 0.6);
+  border-color: rgba(236, 199, 124, 0.6);
+}
+
+.settings-row.is-button {
+  grid-template-columns: minmax(0, 1fr);
+  margin-top: 6px;
+}
+
+.settings-label {
+  font-size: var(--fs-m);
+}
+
+.settings-note {
+  display: block;
+  font-size: var(--fs-s);
+  color: var(--hud-sub);
+}
+
+.settings-range {
+  width: 100%;
+  accent-color: var(--hud-accent);
+  cursor: pointer;
+}
+
+.settings-value {
+  font-size: var(--fs-m);
+  text-align: right;
+  color: var(--hud-accent);
+}
+
+.settings-toggle,
+.settings-choice {
+  padding: 5px 14px;
+  font-size: var(--fs-m);
+  color: var(--hud-text);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 240, 220, 0.25);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.settings-toggle.is-on,
+.settings-choice.is-on {
+  background: rgba(120, 92, 48, 0.9);
+  border-color: var(--hud-accent);
+}
+
+.settings-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.settings-status {
+  margin-top: 10px;
+  font-size: var(--fs-s);
+  color: var(--hud-sub);
+}
+
+/* 選んだことの記録 */
+.history-act {
+  margin-top: 14px;
+}
+
+.history-act-title {
+  margin: 8px 0 0;
+  padding-bottom: 4px;
+  font-size: var(--fs-l);
+  border-bottom: 1px solid var(--paper-line);
+}
+
+.history-details {
+  margin-top: 10px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.3);
+  font-size: var(--fs-m);
+}
+
+.history-details summary {
+  font-size: var(--fs-s);
+  color: var(--ink-sub);
+}
+
+.history-details ul {
+  margin: 6px 0 4px;
+  padding-left: 1.3em;
+  line-height: 1.7;
+}
+
+.history-promise {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 0 8px;
+  font-size: var(--fs-s);
+  border-radius: 4px;
+  border: 1px solid #8a6d45;
+  color: #6d5539;
+}
+
+.history-promise.is-kept {
+  border-color: #557f4d;
+  color: #3f6a37;
+}
+
+.history-pending {
+  margin: 10px 0 0;
+  font-size: var(--fs-m);
+  color: var(--ink-sub);
+}
+
+/* 史実と創作 */
+.result-block.is-pending {
+  border-left-color: #b08a3c;
+  background: rgba(255, 248, 225, 0.5);
+}
+
+.explain-intro {
+  margin: 6px 0 0;
+}
+
+.explain-lead {
+  margin: 0 0 6px;
+  font-size: var(--fs-s);
+  color: var(--ink-sub);
+}
+
+.explain-sources-title {
+  margin-top: 14px;
+  font-weight: 700;
+}
+
+.explain-notes ul {
+  margin: 4px 0;
+  padding-left: 1.3em;
+  word-break: break-all;
+}
+
+/* 作業台：要点と見比べ */
+.plan-glance .forecast {
+  grid-template-columns: 8.5em minmax(0, 1fr);
+}
+
+.plan-forecast > summary {
+  cursor: pointer;
+}
+
+.plan-compare-wrap {
+  overflow-x: auto;
+}
+
+.plan-compare-table {
+  border-collapse: collapse;
+  min-width: 100%;
+  font-size: var(--fs-s);
+  line-height: 1.55;
+}
+
+.plan-compare-table th,
+.plan-compare-table td {
+  min-width: 11em;
+  padding: 6px 8px;
+  vertical-align: top;
+  text-align: left;
+  border-bottom: 1px solid var(--paper-line);
+}
+
+.plan-compare-table .plan-compare-aspect,
+.plan-compare-corner {
+  min-width: 6.5em;
+  color: var(--ink-sub);
+  white-space: nowrap;
+}
+
+.plan-compare-table .is-current {
+  background: rgba(236, 199, 124, 0.18);
+}
+
+.plan-compare-table td.is-uncertain {
+  color: #8a6d45;
+  font-style: italic;
+}
+
+.plan-compare-name {
+  font-size: var(--fs-m);
+  font-weight: 700;
+}
+
+.plan-compare-label {
+  margin-bottom: 4px;
+  font-weight: 400;
+  color: var(--ink-sub);
+}
+
+/* 手帳：一度読んだ記録の全文（開閉式） */
+.notebook-more summary {
+  font-size: var(--fs-s);
+  color: var(--hud-sub);
+}
+
+/* 時間の経過 */
+.transition-layer {
+  z-index: 40;
+  background: #0d0b09;
+  opacity: 0;
+  transition: opacity 0.6s ease-out;
+}
+
+.transition-layer.is-in {
+  opacity: 1;
+}
+
+.transition-box {
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  text-align: center;
+}
+
+.transition-kicker {
+  font-size: var(--fs-m);
+  letter-spacing: 0.3em;
+  color: var(--hud-sub);
+}
+
+.transition-title {
+  margin: 6px 0 22px;
+  font-size: clamp(30px, 5vh, 42px);
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  color: var(--hud-accent);
+}
+
+.transition-line {
+  margin: 0 0 10px;
+  font-size: var(--fs-l);
+  line-height: 1.8;
+  opacity: 0;
+  transform: translateY(6px);
+  transition:
+    opacity 0.7s ease-out,
+    transform 0.7s ease-out;
+}
+
+.transition-line.is-shown {
+  opacity: 1;
+  transform: none;
+}
+
+.transition-button {
+  margin-top: 18px;
+  opacity: 0.35;
+  transition: opacity 0.4s;
+}
+
+.transition-button.is-ready {
+  opacity: 1;
+}
+
+/* 操作の手引き（画面下の中央） */
+.hud-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 32px);
+  padding: 10px 18px;
+  font-size: var(--fs-l);
+  background: var(--hud-bg);
+  border: 1px solid rgba(236, 199, 124, 0.5);
+  border-radius: 999px;
+}
+
+.hud-hint span {
+  margin-left: 4px;
+}
+
+.hud-hint.is-in {
+  animation: hint-in 0.5s ease-out;
+}
+
+@keyframes hint-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+}
+
+#hud.is-dialogue .hud-hint,
+#hud.is-overlay .hud-hint {
+  display: none;
+}
+
+/* 屋根葺きの日のひと言 */
+.speech-bubble {
+  position: absolute;
+  left: 0;
+  top: 0;
+  max-width: 300px;
+  padding: 7px 12px;
+  font-size: var(--fs-m);
+  line-height: 1.5;
+  color: var(--ink);
+  background: rgba(243, 234, 215, 0.95);
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.speech-bubble.is-in {
+  animation: bubble-in 0.3s ease-out;
+}
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.speech-name {
+  display: block;
+  font-size: var(--fs-s);
+  font-weight: 700;
+  color: var(--ink-sub);
+}
+
+#hud.is-dialogue .speech-bubble,
+#hud.is-overlay .speech-bubble {
+  display: none;
+}
+
+/* 段取りを決めた直後のお知らせ：まだ作業の日を迎えていないので、背後の村を見せない */
+.notice-layer.is-solid {
+  background: #0d0b09;
+}
+
+/* 見比べ表は判断の中心なので、補足より大きい本文の大きさにする */
+.plan-compare-table {
+  font-size: var(--fs-m);
+}

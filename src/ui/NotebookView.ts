@@ -137,7 +137,14 @@ export class NotebookView {
     // 1 見出し → 2 要点（大きく） → 3 全文 → 4 入手元とこれまでの記録（開閉式）
     const title = el('div', 'notebook-item-title', showPerson && t.personName ? `${t.personName}｜${t.title}` : t.title);
     if (this.isNew(t)) title.append(el('span', 'badge-new', t.history.length > 0 ? '更新' : '新'));
-    item.append(title, el('div', 'notebook-item-summary', t.summary), el('div', 'notebook-item-text', t.text));
+    item.append(title, el('div', 'notebook-item-summary', t.summary));
+    // 新しい記録・更新された記録は全文を出す。一度読んだ記録は要点だけにし、全文は開いて読む（Phase 6）
+    if (this.isNew(t) || t.text === t.summary) item.append(el('div', 'notebook-item-text', t.text));
+    else {
+      const more = el('details', 'notebook-more');
+      more.append(el('summary', undefined, '全文を読む'), el('div', 'notebook-item-text', t.text));
+      item.append(more);
+    }
     if (t.source || t.history.length > 0) {
       const details = el('details', 'notebook-history');
       details.append(el('summary', undefined, t.history.length > 0 ? `どこで知ったか・これまでの記録（${t.history.length}）` : 'どこで知ったか'));

@@ -307,7 +307,9 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
       dayEnd: {
         lines: ['（日が傾いてきた。）'],
         choices: [
-          { text: '一日を終える', effects: [setFlag('roofDay:ended')] },
+          // 葺き替えの記録は、作業の日を終えたときに付ける（決めた時点ではまだ葺いていない。Phase 6）
+          { text: '一日を終える', when: not(partial), effects: [learn('sae.roof', 'renewed'), setFlag('roofDay:ended')] },
+          { text: '一日を終える', when: partial, effects: [learn('sae.roof', 'partial'), setFlag('roofDay:ended')] },
           ASK_LEDGER_LATER,
           { text: 'もう少し見て回る' },
         ],

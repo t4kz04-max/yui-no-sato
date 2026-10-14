@@ -92,6 +92,17 @@ export class RoofDayScene {
     ];
   }
 
+  /** 作業している村の人の今の位置と役割（近くを通ったときのひと言に使う。Phase 6）。 */
+  crewSpots(): Array<{ readonly id: string; readonly role: CrewMember['role']; readonly x: number; readonly y: number; readonly z: number }> {
+    const stage = this.stage;
+    if (!stage) return [];
+    return this.figures.map((f, i) => {
+      const m = stage.crew[i]!;
+      const p = f.root.position;
+      return { id: m.id, role: m.role, x: p.x, y: p.y, z: p.z };
+    });
+  }
+
   /** 運ぶ人が動いたか（当たり判定の更新が必要か）を返す。 */
   update(dt: number, player: Vec2): boolean {
     if (!this.stage) return false;

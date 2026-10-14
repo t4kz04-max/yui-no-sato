@@ -178,3 +178,86 @@ export function roofDayColliders(stage: RoofDayStage): Collider[] {
     ...staticCrew(stage).map((c) => ({ kind: 'circle' as const, x: c.position.x, z: c.position.z, radius: CREW_RADIUS })),
   ];
 }
+
+// ───────── 屋根葺きの日の演出（Phase 6） ─────────
+
+/** 当日の作業の進み方：朝の時点の進み具合と、その日のうちに届く上限（南面の下から上へ葺き進む）。 */
+export interface RoofDayWork {
+  /** 着いた時点の進み具合（0〜1）。 */
+  readonly start: number;
+  /** その日のうちに届く進み具合（人手の少ない計画は二日がかりなので途中まで）。 */
+  readonly max: number;
+  /** 上限に届くまでの時間（秒。プレイヤーが村を見て回る時間に合わせた目安）。 */
+  readonly seconds: number;
+}
+
+export function roofDayWork(outcomeId: string): RoofDayWork | null {
+  const o = parseOutcomeId(outcomeId);
+  if (!o) return null;
+  // 人手の少ない計画（伊助なし）は「今日のうちには終わらない」。前日の準備が済んでいれば早く進む
+  if (o.family === 'solo') return { start: 0.1, max: 0.45, seconds: 180 };
+  if (o.family === 'prep') return { start: 0.3, max: 0.95, seconds: 150 };
+  return { start: 0.2, max: 0.9, seconds: 160 };
+}
+
+/** 着いてからの時間に応じた進み具合（0〜1）。 */
+export function roofDayProgress(work: RoofDayWork, elapsed: number): number {
+  const t = Math.max(0, Math.min(1, elapsed / work.seconds));
+  return work.start + (work.max - work.start) * t;
+}
+
+/** 屋根葺きの日に着いたときに出す、短い要約（誰が来ているか・茅・足場）。すべて結果の定義から作る。 */
+export interface RoofDayArrival {
+  readonly when: string;
+  readonly lines: readonly string[];
+}
+
+const NAME: Readonly<Record<string, string>> = { sohei: '宗平さん', isuke: '伊助さん', mine: 'ミネさん' };
+
+export function roofDayArrival(outcomeId: string): RoofDayArrival | null {
+  const def = OUTCOMES[outcomeId];
+  const stage = roofDayStage(outcomeId);
+  const o = parseOutcomeId(outcomeId);
+  if (!def || !stage || !o) return null;
+  const named = (['sohei', 'isuke', 'mine'] as const).filter((c) => c in def.placements).map((c) => NAME[c]);
+  const lines: string[] = [];
+  lines.push(`サエ家の前に集まったのは、${[...named, '村の人たち'].join('、')}。`);
+  if (o.family === 'solo') lines.push('人手は少ない。今日のうちには終わらないだろう。');
+  if (o.family === 'prep') lines.push('前の日に、伊助さんが茅を運び、足場を組んでくれていた。');
+  if (o.family === 'wait') lines.push('待つあいだに、屋根の傷みは広がっていた。');
+  if (o.family === 'waitHelp') lines.push('先に伊助家の刈り入れを済ませ、皆がそろう日を待った。');
+  lines.push(stage.mineKaya ? 'ミネさんの茅が、家の東に積まれている。足場は南面いっぱいに組まれた。' : '茅はサエ家の手持ちの分だけ。足場は傷んだ所にだけ組まれた。');
+  return { when: def.when, lines };
+}
+
+/**
+ * 当日、近くを通ったときの住民・村の人のひと言（作業の様子と、計画の結果で変わる事情）。
+ * キー：人物 ID（名前のある住民）または `crew:役割`（名前のない村の人）。作業の場にいない人のひと言は、いつもの場所で聞ける。
+ */
+export function roofDayBarks(outcomeId: string): Readonly<Record<string, readonly string[]>> {
+  const o = parseOutcomeId(outcomeId);
+  const def = OUTCOMES[outcomeId];
+  if (!o || !def) return {};
+  const barks: Record<string, string[]> = {};
+  const onSite = (c: string) => c in def.placements;
+  barks.sohei = [
+    o.family === 'solo'
+      ? '人手が足りん。今日は下の段までだな'
+      : o.family === 'prep'
+        ? '足場ができとるから、段取りが早い'
+        : o.family === 'wait'
+          ? '待った分、傷みが広がっとる。手間だな'
+          : '皆そろったな。今日のうちに片づけるぞ',
+  ];
+  if (onSite('isuke')) {
+    barks.isuke = [o.family === 'waitHelp' ? 'サエさんちが手伝ってくれて、刈り入れが早く済んだ' : '刈り入れは済んだ。今日はこっちだ'];
+  } else {
+    barks.isuke = [o.family === 'prep' ? '昨日の足場、役に立っとるか。こっちは稲刈りだ' : '屋根葺きは今日か。……こっちも手が離せん'];
+  }
+  if (onSite('mine')) barks.mine = ['この茅は、来年の秋に茅で返してもらう約束だよ'];
+  barks['crew:roof'] = [o.full ? '新しい茅は、手ざわりが違うな' : '茅が足りん。傷んだ所だけだ', 'もう少し上だ、叩いて締めろ'];
+  barks['crew:carry'] = ['もう一束、運ぶぞ'];
+  barks['crew:pass'] = ['ほい、受け取った'];
+  barks['crew:sort'] = ['束をそろえておくよ'];
+  return barks;
+}

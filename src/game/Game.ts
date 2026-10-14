@@ -69,12 +69,30 @@ import { SAE_INTERIOR, isInsideSaeHouse } from '../world/saeInterior';
 import { DEFAULT_ORBIT_LIMITS, INDOOR_ORBIT_LIMITS } from '../camera/orbit';
 import { INDOOR_SKY_LIGHT_SCALE } from '../world/builders/interior';
 import { createSave, type SaveFile } from '../save/saveData';
-import { SaveStore, browserStorage } from '../save/SaveStore';
-import { allowsExploration, nextMode, type UiAction, type UiMode } from './modes';
+import { SaveStore, browserStorage, type LoadResult } from '../save/SaveStore';
+import { RETURN_ACTION, allowsExploration, nextMode, type UiAction, type UiMode } from './modes';
 import type { GameEvents } from './events';
+import { AudioEngine, type UiSound } from '../audio/AudioEngine';
+import { ambientMix, duckFactor, footstepSurface, musicMood, workSound } from '../audio/mix';
+import { CHARS_PER_SECOND, SettingsStore, effectiveVolumes, type Settings } from '../settings/settings';
+import { selectHint, type HintId } from './hints';
+import { TitleScreen } from '../ui/TitleScreen';
+import { SettingsView } from '../ui/SettingsView';
+import { HistoryView } from '../ui/HistoryView';
+import { TransitionView, type TransitionContent } from '../ui/TransitionView';
+import { SpeechBubble } from '../ui/SpeechBubble';
+import { buildHistory, type HistorySources } from '../journal/historyModel';
+import { unlockedOptions } from '../journal/planModels';
+import { roofDayArrival, roofDayBarks, roofDayProgress, roofDayWork } from '../content/staging';
+import { glancePlan } from '../content/plan';
+import { glancePlan3 } from '../content/plan3';
+import { INDOOR_FRAMING, OUTDOOR_FRAMING, orbitSettingsFor } from '../camera/orbit';
+import { CHAPTER_LABEL } from '../story/types';
 
-/** 会話中のカメラ（相手と自分が斜めに見える構図）。 */
-const TALK_CAMERA = { yawOffset: 0.85, pitch: 0.2, distance: 5.2 } as const;
+/** 会話中のカメラ（相手と自分が斜めに見える構図）。注視点は顔の高さ。 */
+const TALK_CAMERA = { yawOffset: 0.85, pitch: 0.2, distance: 5.2, lookHeight: 1.55 } as const;
+/** 屋外の注視点の高さ（屋根まで入れるため高め。Phase 6）。 */
+const OUTDOOR_LOOK_HEIGHT = 2.3;
 /** 案内表示を出す高さ（住民の頭上）。 */
 const NPC_PROMPT_HEIGHT = 2.55;
 const JOURNAL_SOURCES: JournalSources = {
@@ -88,6 +106,7 @@ const PLAN_SOURCES: PlanSources = {
     roof: {
       summaries: RESPONSE_SUMMARY,
       forecast: forecastPlan,
+      glance: glancePlan,
       relevantTopics: RELEVANT_TOPICS,
       outcomeTitle: (id) => OUTCOMES[id]?.title,
       outcomeTagline: (id) => OUTCOMES[id]?.tagline,
@@ -95,12 +114,50 @@ const PLAN_SOURCES: PlanSources = {
     isukeRoof: {
       summaries: RESPONSE_SUMMARY3,
       forecast: forecastPlan3,
+      glance: glancePlan3,
       relevantTopics: RELEVANT_TOPICS3,
       outcomeTitle: (id) => (ENDINGS[id] ? `${ENDINGS[id].code} ${ENDINGS[id].title}` : undefined),
       outcomeTagline: (id) => ENDINGS[id]?.title,
     },
   },
 };
+/** 選んだことの記録（Phase 6）。結果は実際に起きたこと（作業の日を終えた後）だけを出す。 */
+const HISTORY_SOURCES: HistorySources = {
+  ...JOURNAL_SOURCES,
+  actLabel: { roof: '第1幕　サエ家の屋根葺き', isukeRoof: '第3幕　伊助家の屋根葺き' },
+  relevantTopics: { roof: RELEVANT_TOPICS, isukeRoof: RELEVANT_TOPICS3 },
+  tagline: (planId, id) => (planId === 'roof' ? OUTCOMES[id]?.tagline : ENDINGS[id] ? `${ENDINGS[id].code} ${ENDINGS[id].title}` : undefined),
+  result: (planId, id, story) => {
+    if (planId === 'roof') {
+      // 屋根葺きの日を終えるまでは、結果はまだ分からない
+      if (story.chapter === 'roofDay' && !story.has('roofDay:ended')) return null;
+      const o = buildOutcome(story, OUTCOMES, JOURNAL_SOURCES, 'roof');
+      return o ? { title: o.title, achieved: o.achieved, remains: o.costs } : null;
+    }
+    const e = ENDINGS[id];
+    return e ? { title: `${e.code} ${e.title}`, achieved: shownLines(story, e.achieved), remains: shownLines(story, e.remains) } : null;
+  },
+};
+/** タイトル画面の背景：村の広場の上からゆっくり見回す。 */
+const TITLE_CAMERA = { focus: { x: 0, y: 2, z: 16 }, pitch: 0.3, distance: 21, turnSpeed: 0.04 } as const;
+/** 屋根葺きの日に着いたときの短い見渡し（サエ家の南面。数秒・飛ばせる）。 */
+const ROOF_DAY_SHOT = { focus: { x: 0, y: 3, z: 14 }, yaw: Math.PI, pitch: 0.24, distance: 20, seconds: 4.5 } as const;
+/** 屋根葺きの日の作業の場（サエ家の南面の前。作業の音の聞こえ方に使う）。 */
+const ROOF_DAY_SITE = { x: 0, z: 8 } as const;
+/** 住民のひと言：聞こえる距離・一人あたりの間隔・全体の間隔・表示の長さ（秒）。 */
+const BARK = { range: 4.5, roofRange: 9, cooldown: 28, gap: 7, duration: 3.6 } as const;
+/** 新しく始めたときの導入（物語の情報は、会話で知ることだけにする）。 */
+const OPENING: TransitionContent = {
+  kicker: '第1幕',
+  title: '屋根葺きを控えた秋',
+  lines: [
+    '合掌造りの家が並ぶ、山あいの小さな村（架空の村）。',
+    '世話役の宗平さんから、サエ家の屋根葺きの相談役を頼まれた。',
+    '誰かに命令できるわけではない。まずは村を歩いて、みんなの事情を聞いてみよう。',
+  ],
+  button: '村に出る',
+};
+
 const NOTEBOOK_TAB_KEYS: ReadonlyArray<[string, NotebookTab]> = [
   ['Digit1', 'people'],
   ['Digit2', 'known'],
@@ -117,7 +174,8 @@ const NOTEBOOK_TAB_KEYS: ReadonlyArray<[string, NotebookTab]> = [
  */
 export class Game {
   readonly scene = new THREE.Scene();
-  readonly camera = new THREE.PerspectiveCamera(50, 1, 0.1, 600);
+  /** 画角 55°（Phase 6 で 50° から広げ、合掌造りの屋根が入りやすくした）。 */
+  readonly camera = new THREE.PerspectiveCamera(55, 1, 0.1, 600);
   readonly world: World;
   readonly player: PlayerState;
   readonly events = new EventBus<GameEvents>();
@@ -161,7 +219,7 @@ export class Game {
   private uiMode: UiMode = 'explore';
   private area: LocationId | null = null;
   /** 会話前のカメラの上下角と距離（会話後に戻す）。 */
-  private savedCamera: { pitch: number; distance: number } | null = null;
+  private savedCamera: { pitch: number; distance: number; lookHeight: number } | null = null;
   /** 手帳を最後に閉じた時点の記録の順番（これより新しいものに「新」を付ける）。 */
   private notebookSeenOrder = 0;
   /** お知らせ画面のボタンごとの処理。 */
@@ -171,8 +229,44 @@ export class Game {
   private fpsTime = 0;
   private fps = 0;
 
+  // ───────── Phase 6：タイトル・設定・音・手引き・演出 ─────────
+  readonly settingsStore: SettingsStore;
+  readonly audio = new AudioEngine();
+  private readonly titleScreen: TitleScreen;
+  private readonly settingsView: SettingsView;
+  private readonly historyView: HistoryView;
+  private readonly transitionView: TransitionView;
+  private readonly bubble: SpeechBubble;
+  /** 設定・記録・解説を閉じたときに戻る画面（タイトル・ポーズ・結果・エンディング）。 */
+  private returnTo: UiMode | null = null;
+  /** タイトル画面で読んだ前回の記録。 */
+  private titleSave: LoadResult | null = null;
+  /** 時間経過の画面を閉じたときの処理。 */
+  private afterTransition: (() => void) | null = null;
+  /** 計画を決めた瞬間は、手帳・意向・約束の通知を出さない（決定の知らせにまとめる）。 */
+  private quietNotices = false;
+  /** 作業台で考えられる選択肢（発見で増えたら知らせる）。 */
+  private knownOptions = new Set<string>();
+  /** 屋根葺きの日に着いてからの時間（作業の進み具合）。 */
+  private roofDayElapsed = 0;
+  /** 短いカメラ演出の残り時間。 */
+  /** 短いカメラ演出が終わる時刻（実時間。描画が重くてもフレームの数に左右されないように）。 */
+  private cinematicEnd = 0;
+  /** 探索した時間と、手引きの判定に使う操作の量。 */
+  private exploreTime = 0;
+  private movedTime = 0;
+  private lookedAmount = 0;
+  /** 住民のひと言：表示中の話し手・残り時間・話し手ごとの最後の時刻。 */
+  private bark: { key: string; name: string | null; text: string; time: number; at: () => { x: number; y: number; z: number } | null } | null = null;
+  private barkGap = 0;
+  private readonly barkLast = new Map<string, number>();
+  private readonly barkCount = new Map<string, number>();
+  private clock = 0;
+  private lastDialogueKey = '';
+
   constructor(canvasRoot: HTMLElement, hudRoot: HTMLElement) {
     this.hud = new Hud(hudRoot);
+    this.settingsStore = new SettingsStore(browserStorage());
     this.fadeEl = document.createElement('div');
     this.fadeEl.className = 'scene-fade';
     hudRoot.appendChild(this.fadeEl);
@@ -180,7 +274,10 @@ export class Game {
     this.toasts = new Toasts(this.hud.rightColumn);
     this.dialogueBox = new DialogueBox(hudRoot, {
       onAdvance: () => this.advanceDialogue(),
-      onChoose: (i) => this.interaction.choose(i),
+      onChoose: (i) => {
+        this.sound('confirm');
+        this.interaction.choose(i);
+      },
       onHover: (i) => this.interaction.select(i),
     });
     this.notebook = new NotebookView(hudRoot, () => this.dispatch('close'));
@@ -197,11 +294,28 @@ export class Game {
       onClose: () => this.dispatch('close'),
       onNotebook: () => this.dispatch('openNotebook'),
     });
-    this.resultView = new ResultView(hudRoot, () => this.onResultClosed());
-    this.endingView = new EndingView(hudRoot, { onClose: () => this.dispatch('close'), onExplain: () => this.dispatch('openExplain') });
-    this.explainView = new ExplainView(hudRoot, () => this.dispatch('close'));
-    this.pauseMenu = new MenuPanel(hudRoot, 'pause-layer', (id) => this.onPauseItem(id));
-    this.notice = new MenuPanel(hudRoot, 'notice-layer', (id) => this.noticeHandlers[id]?.());
+    this.resultView = new ResultView(
+      hudRoot,
+      () => this.onResultClosed(),
+      () => this.openSubScreen('openHistory'),
+    );
+    this.endingView = new EndingView(hudRoot, {
+      onClose: () => this.dispatch('close'),
+      onExplain: () => this.openSubScreen('openExplain'),
+      onHistory: () => this.openSubScreen('openHistory'),
+    });
+    this.explainView = new ExplainView(hudRoot, () => this.closeSubScreen());
+    this.historyView = new HistoryView(hudRoot, () => this.closeSubScreen());
+    this.settingsView = new SettingsView(hudRoot, {
+      onChange: (patch) => this.changeSettings(patch),
+      onClose: () => this.closeSubScreen(),
+      onMove: () => this.sound('move'),
+    });
+    this.pauseMenu = new MenuPanel(hudRoot, 'pause-layer', (id) => this.onPauseItem(id), () => this.sound('move'));
+    this.notice = new MenuPanel(hudRoot, 'notice-layer', (id) => this.noticeHandlers[id]?.(), () => this.sound('move'));
+    this.titleScreen = new TitleScreen(hudRoot, (id) => this.onTitleItem(id), () => this.sound('move'));
+    this.transitionView = new TransitionView(hudRoot, () => this.finishTransition());
+    this.bubble = new SpeechBubble(hudRoot);
 
     this.renderer = createRenderer(canvasRoot);
     this.disposers.push(bindResize(canvasRoot, this.renderer, this.camera));
@@ -256,7 +370,18 @@ export class Game {
     this.input = new InputManager(this.renderer.domElement);
     this.disposers.push(() => this.input.dispose());
     this.loop = new GameLoop((dt) => this.update(dt));
-    this.checkSaveOnStart();
+
+    // 音は、ユーザーの操作（クリック・キー）があってから鳴らし始める（ブラウザの自動再生の制限）
+    const unlock = () => this.audio.unlock();
+    window.addEventListener('pointerdown', unlock, true);
+    window.addEventListener('keydown', unlock, true);
+    this.disposers.push(() => {
+      window.removeEventListener('pointerdown', unlock, true);
+      window.removeEventListener('keydown', unlock, true);
+    });
+    this.applySettings(this.settingsStore.value);
+    this.knownOptions = unlockedOptions(this.story);
+    this.showTitle();
   }
 
   start(): void {
@@ -287,22 +412,34 @@ export class Game {
     this.events.on('flagSet', refreshObjective);
     this.events.on('topicLearned', ({ topic, stage, previous }) => {
       refreshObjective();
+      this.refreshNotebookBadge();
+      if (this.quietNotices) return;
       // 通知には要点を出す（何が分かったかが一目で分かるように）
       const def = STORY_DEFS.topics[topic];
       const person = def?.person ? `${CHARACTERS[def.person as CharacterId]?.name ?? def.person}：` : '';
       const summary = def?.stages.find((s) => s.id === stage)?.summary ?? def?.title ?? topic;
       this.toasts.push(previous ? '手帳を更新' : '手帳に記録', person + summary);
-      this.refreshNotebookBadge();
+      // その発見で作業台の選択肢が増えたら、意味を一行で添える（どの案かは作業台で確かめる）
+      const options = unlockedOptions(this.story);
+      const added = [...options].some((o) => !this.knownOptions.has(o));
+      this.knownOptions = options;
+      if (added && this.story.planPhase() !== 'decided') {
+        this.toasts.push('作業台', '考えられる案が増えた（作業台で確かめられる）');
+        this.sound('discover');
+      } else this.sound('notebook');
     });
     this.events.on('consentChanged', ({ npc, request, status }) => {
+      this.refreshNotebookBadge();
+      if (this.quietNotices) return;
       const who = CHARACTERS[npc as CharacterId]?.name ?? npc;
       const what = STORY_DEFS.requests[request]?.label ?? request;
       this.toasts.push('意向', `${who}：${what}は「${CONSENT_LABEL[status]}」`);
-      this.refreshNotebookBadge();
     });
     this.events.on('promiseRecorded', () => {
-      this.toasts.push('約束', '新しい約束を書き留めた');
       this.refreshNotebookBadge();
+      if (this.quietNotices) return;
+      this.toasts.push('約束', '新しい約束を書き留めた');
+      this.sound('promise');
     });
     const refreshPlan = () => {
       refreshObjective();
@@ -315,16 +452,21 @@ export class Game {
       const who = CHARACTERS[npc as CharacterId]?.name ?? npc;
       this.toasts.push('相談', `${who}：今の案への返事は「${CONSENT_LABEL[status]}」`);
       this.refreshNotebookBadge();
+      this.sound('notebook');
     });
     this.events.on('flagSet', ({ flag }) => {
       if (flag === 'roofDay:ended') this.endDayAfterDialogue = true;
     });
     this.events.on('chapterChanged', () => {
       refreshObjective();
+      this.knownOptions = unlockedOptions(this.story);
+      this.roofDayElapsed = 0;
       this.applyChapterToWorld();
     });
     this.events.on('storyRestored', () => {
       refreshObjective();
+      this.knownOptions = unlockedOptions(this.story);
+      this.roofDayElapsed = 0;
       this.applyChapterToWorld();
       this.refreshNotebookBadge();
     });
@@ -355,19 +497,37 @@ export class Game {
     if (prev === 'explain') this.explainView.hide();
     if (prev === 'pause') this.pauseMenu.hide();
     if (prev === 'notice') this.notice.hide();
+    if (prev === 'title') this.titleScreen.hide();
+    if (prev === 'settings') this.settingsView.hide();
+    if (prev === 'history') this.historyView.hide();
+    if (prev === 'transition') this.transitionView.hide();
+    if (prev === 'cinematic') this.endCinematic();
 
-    if (next === 'notebook') this.notebook.show(buildNotebook(this.story, JOURNAL_SOURCES), this.notebookSeenOrder);
+    if (next === 'notebook') {
+      this.notebook.show(buildNotebook(this.story, JOURNAL_SOURCES), this.notebookSeenOrder);
+      this.markHint('notebook');
+    }
     if (next === 'ledger') this.ledger.show(buildLedger(this.story, ledgerEntries(this.story), JOURNAL_SOURCES));
     if (next === 'ending') this.endingView.show(this.endingModel());
     if (next === 'explain') this.explainView.show(EXPLAIN);
+    if (next === 'settings') this.settingsView.show(this.settingsStore.value);
+    if (next === 'history') this.historyView.show(buildHistory(this.story, HISTORY_SOURCES));
+    // 開く音（帳面は紙をめくる音、ほかは控えめな音）
+    if (next === 'ledger') this.sound('ledger');
+    else if (['notebook', 'plan', 'pause', 'settings', 'history', 'explain'].includes(next)) this.sound('open');
     if (next === 'plan') this.planView.show(buildPlanBoard(this.story, PLAN_SOURCES));
     if (next === 'result') {
       const outcome = buildOutcome(this.story, OUTCOMES, JOURNAL_SOURCES, 'roof');
       if (outcome) this.resultView.show(outcome);
     }
-    if (next === 'pause') this.pauseMenu.show(this.pauseContent());
-    // お知らせの中身は showNotice で表示する
+    if (next === 'pause') {
+      this.pauseMenu.show(this.pauseContent());
+      this.markHint('pause');
+    }
+    // お知らせ・タイトル・時間経過の中身は、それぞれ showNotice・showTitle・showTransition で表示する
     this.hud.setOverlayMode(next !== 'explore' && next !== 'dialogue');
+    this.hud.setTitleMode(next === 'title' || next === 'transition' || next === 'cinematic');
+    if (next !== 'explore') this.hideBark();
     // 画面を切り替えたら、押しっぱなしのキーや溜まった視点操作を捨てる
     this.input.reset();
   }
@@ -379,10 +539,15 @@ export class Game {
   // ───────── 毎フレームの更新 ─────────
 
   private update(dt: number): void {
+    this.clock += dt;
     if (this.input.wasPressed('F3')) this.hud.toggleDebug();
-    if (this.input.wasPressed('KeyH')) this.hud.toggleHelp();
+    if (this.input.wasPressed('KeyH') && this.uiMode !== 'settings') this.changeSettings({ showControls: !this.hud.helpVisible });
+    if (this.input.wasPressed('KeyM')) this.toggleMute();
 
     switch (this.uiMode) {
+      case 'title':
+        this.handleTitleInput();
+        break;
       case 'explore':
         this.handleExploreInput();
         break;
@@ -411,7 +576,11 @@ export class Game {
         }
         break;
       case 'explain':
-        if (this.input.wasPressed('Escape')) this.dispatch('esc');
+      case 'history':
+        if (this.input.wasPressed('Escape')) this.closeSubScreen();
+        break;
+      case 'settings':
+        this.handleSettingsInput();
         break;
       case 'pause':
         if (this.input.wasPressed('Escape')) this.dispatch('esc');
@@ -420,10 +589,18 @@ export class Game {
       case 'notice':
         this.handleMenuInput(this.notice);
         break;
+      case 'transition':
+        this.transitionView.update(dt);
+        if (this.anyConfirm() || this.input.wasPressed('Escape')) this.transitionView.advance();
+        break;
+      case 'cinematic':
+        if (performance.now() >= this.cinematicEnd || this.anyConfirm() || this.input.wasPressed('Escape')) this.dispatch('close');
+        break;
     }
     this.input.enabled = allowsExploration(this.uiMode);
 
-    updatePlayer(this.player, this.input.getMoveIntent(), this.cameraRig.yaw, dt, this.world);
+    const intent = this.input.getMoveIntent();
+    updatePlayer(this.player, intent, this.cameraRig.yaw, dt, this.world);
     const partner = this.interaction.partner;
     if (partner) {
       // 会話・調査の相手の方を向く
@@ -439,17 +616,40 @@ export class Game {
       const talking = partner?.id === id;
       view.update(dt, talking ? this.player : null, talking && this.dialogueBox.isRevealing);
     }
-    // 屋根葺きの日：茅を運ぶ人が動いたら、当たり判定を付け直す
+    // 屋根葺きの日：茅を運ぶ人が動いたら、当たり判定を付け直す。作業の進み具合を屋根に表す
     if (this.roofDay.update(dt, this.player)) this.world.setExtraColliders(this.roofDay.colliders());
-    this.cameraRig.update(this.cameraFocus(partner), this.input.consumeOrbitInput(), dt);
-    // 室内の壁際などでカメラがすぐ後ろまで寄ったときは、主人公を隠して視界をふさがない
-    this.playerView.root.visible = this.cameraRig.currentDistance > 1.25;
+    this.updateRoofWork(dt);
+
+    const orbitInput = this.input.consumeOrbitInput();
+    const look = this.settingsStore.value.invertY ? { ...orbitInput, lookY: -orbitInput.lookY } : orbitInput;
+    if (this.uiMode === 'title') {
+      // タイトル：村の広場の上から、ゆっくり見回す
+      this.cameraRig.update(TITLE_CAMERA.focus, { lookX: -TITLE_CAMERA.turnSpeed * dt * 200, lookY: 0, zoom: 0 }, dt);
+    } else if (this.uiMode === 'cinematic') {
+      this.cameraRig.update(ROOF_DAY_SHOT.focus, { lookX: -dt * 6, lookY: 0, zoom: 0 }, dt);
+    } else {
+      this.cameraRig.update(this.cameraFocus(partner), look, dt);
+    }
+    // 室内の壁際などでカメラがすぐ後ろまで寄ったときは、主人公を半透明にする（消すと位置が分からなくなる）
+    const d = this.cameraRig.currentDistance;
+    this.playerView.setOpacity(this.uiMode === 'title' ? 1 : d >= 1.7 ? 1 : Math.max(0.3, (d - 0.9) / 0.8));
     this.updateMarker(dt);
+
+    if (this.uiMode === 'explore') this.updateExploreHelpers(dt, intent, look);
+    else this.hud.setHint(null);
+    this.updateBark(dt);
+    this.updateAudio();
 
     this.renderer.render(this.scene, this.camera);
     this.updateUi(dt);
     this.input.endFrame();
     this.updateStats(dt);
+  }
+
+  /** 決定キー（Enter・Space・E）が押されたか。 */
+  private anyConfirm(): boolean {
+    const i = this.input;
+    return i.wasPressed('Enter') || i.wasPressed('NumpadEnter') || i.wasPressed('Space') || i.wasPressed('KeyE');
   }
 
   private handleExploreInput(): void {
@@ -458,6 +658,322 @@ export class Game {
     else if (input.wasPressed('Tab')) this.dispatch('tab');
     else if (input.wasPressed('KeyE')) this.interaction.interact();
   }
+
+  private handleTitleInput(): void {
+    const input = this.input;
+    if (input.wasPressed('ArrowUp') || input.wasPressed('KeyW')) this.titleScreen.moveSelection(-1);
+    if (input.wasPressed('ArrowDown') || input.wasPressed('KeyS')) this.titleScreen.moveSelection(1);
+    if (this.anyConfirm()) this.titleScreen.activate();
+  }
+
+  private handleSettingsInput(): void {
+    const input = this.input;
+    if (input.wasPressed('Escape')) return this.closeSubScreen();
+    if (input.wasPressed('ArrowUp') || input.wasPressed('KeyW')) this.settingsView.moveSelection(-1);
+    if (input.wasPressed('ArrowDown') || input.wasPressed('KeyS')) this.settingsView.moveSelection(1);
+    if (input.wasPressed('ArrowLeft') || input.wasPressed('KeyA')) this.settingsView.adjust(-1);
+    if (input.wasPressed('ArrowRight') || input.wasPressed('KeyD')) this.settingsView.adjust(1);
+    if (input.wasPressed('Enter') || input.wasPressed('NumpadEnter') || input.wasPressed('Space')) this.settingsView.activate();
+  }
+
+  // ───────── 操作の手引き・住民のひと言・作業の進み具合（Phase 6） ─────────
+
+  private updateExploreHelpers(
+    dt: number,
+    intent: { forward: number; right: number; run: boolean },
+    look: { lookX: number; lookY: number; zoom: number },
+  ): void {
+    this.exploreTime += dt;
+    const moving = intent.forward !== 0 || intent.right !== 0;
+    if (moving) this.movedTime += dt;
+    if (this.movedTime > 0.8) this.markHint('move');
+    if (moving && intent.run) this.markHint('run');
+    this.lookedAmount += Math.abs(look.lookX) + Math.abs(look.lookY) + Math.abs(look.zoom) * 0.2;
+    if (this.lookedAmount > 60) this.markHint('look');
+    const s = this.settingsStore.value;
+    this.hud.setHint(
+      s.showHints
+        ? selectHint({
+            done: new Set(s.hintsDone),
+            exploring: true,
+            hasTarget: this.interaction.target !== null,
+            hasNotebookEntry: this.story.allLearned().length > 0,
+            exploreTime: this.exploreTime,
+          })
+        : null,
+    );
+  }
+
+  private markHint(id: HintId): void {
+    const done = this.settingsStore.value.hintsDone;
+    if (done.includes(id)) return;
+    this.settingsStore.update({ hintsDone: [...done, id] });
+    if (this.hud.hint === id) this.hud.setHint(null);
+  }
+
+  /** 屋根葺きの日：着いてからの時間で、南面が軒先から葺き進む。 */
+  private updateRoofWork(dt: number): void {
+    const decision = this.story.planDecision('roof');
+    const stage = this.roofDay.current;
+    if (this.story.chapter !== 'roofDay' || !decision || !stage) return;
+    const work = roofDayWork(decision.outcome);
+    if (!work) return;
+    // ポーズ・タイトル・時間経過の間は進めない（見て回っている時間に合わせる）
+    if (this.uiMode !== 'pause' && this.uiMode !== 'title' && this.uiMode !== 'transition') this.roofDayElapsed += dt;
+    this.world.setRoofWork('sae', { progress: roofDayProgress(work, this.roofDayElapsed), full: stage.extent === 'full' });
+  }
+
+  /** 屋根葺きの日、住民・村の人の近くを通ると、頭上に短いひと言が出る。 */
+  private updateBark(dt: number): void {
+    this.barkGap -= dt;
+    if (this.bark) {
+      this.bark.time -= dt;
+      const at = this.bark.at();
+      if (this.bark.time <= 0 || !at || this.uiMode !== 'explore') {
+        this.hideBark();
+        return;
+      }
+      this.projected.set(at.x, at.y + 2.3, at.z).project(this.camera);
+      if (this.projected.z > 1) this.bubble.hide();
+      else {
+        const canvas = this.renderer.domElement;
+        if (!this.bubble.visible) this.bubble.show(this.bark.name, this.bark.text);
+        this.bubble.place((this.projected.x * 0.5 + 0.5) * canvas.clientWidth, (-this.projected.y * 0.5 + 0.5) * canvas.clientHeight);
+      }
+      return;
+    }
+    const decision = this.story.planDecision('roof');
+    if (this.uiMode !== 'explore' || this.story.chapter !== 'roofDay' || !decision || this.barkGap > 0) return;
+    const barks = roofDayBarks(decision.outcome);
+    type Candidate = { key: string; name: string | null; dist: number; at: () => { x: number; y: number; z: number } | null };
+    const candidates: Candidate[] = [];
+    for (const npc of NPCS) {
+      const view = this.npcViews.get(npc.id);
+      if (!barks[npc.character] || !view) continue;
+      const p = view.root.position;
+      candidates.push({
+        key: npc.character,
+        name: CHARACTERS[npc.character as CharacterId].name,
+        dist: Math.hypot(p.x - this.player.x, p.z - this.player.z),
+        at: () => view.root.position,
+      });
+    }
+    for (const c of this.roofDay.crewSpots()) {
+      const id = c.id;
+      // 屋根の上の人は高い所にいるので、少し離れていても聞こえる
+      const scale = c.role === 'roof' ? BARK.range / BARK.roofRange : 1;
+      candidates.push({
+        key: `crew:${c.role}`,
+        name: '村の人',
+        dist: Math.hypot(c.x - this.player.x, c.z - this.player.z) * scale,
+        at: () => this.roofDay.crewSpots().find((s) => s.id === id) ?? null,
+      });
+    }
+    const near = candidates
+      .filter((c) => c.dist < BARK.range && this.clock - (this.barkLast.get(c.key) ?? -Infinity) > BARK.cooldown)
+      .sort((a, b) => a.dist - b.dist)[0];
+    const lines = near ? (barks[near.key] ?? []) : [];
+    if (!near || lines.length === 0) return;
+    const n = this.barkCount.get(near.key) ?? 0;
+    this.barkCount.set(near.key, n + 1);
+    this.barkLast.set(near.key, this.clock);
+    this.barkGap = BARK.gap;
+    this.bark = { key: near.key, name: near.name, text: lines[n % lines.length]!, time: BARK.duration, at: near.at };
+  }
+
+  private hideBark(): void {
+    this.bark = null;
+    this.bubble.hide();
+  }
+
+  // ───────── 音（Phase 6） ─────────
+
+  private sound(s: UiSound): void {
+    this.audio.play(s);
+  }
+
+  private updateAudio(): void {
+    const mode = this.uiMode;
+    const duck =
+      mode === 'explore' || mode === 'cinematic'
+        ? 'explore'
+        : mode === 'dialogue' || mode === 'title' || mode === 'transition'
+          ? mode
+          : 'overlay';
+    this.audio.setDuck(duckFactor(duck));
+    const indoor = this.world.indoor;
+    this.audio.setAmbient(ambientMix({ x: this.player.x, z: this.player.z, indoor }));
+    this.audio.setMood(musicMood(this.story.chapter, mode === 'title' ? 'title' : mode === 'ending' ? 'ending' : 'game'));
+    const stage = this.roofDay.current;
+    const roofWorkers = stage && this.story.chapter === 'roofDay' && mode !== 'title' ? stage.crew.filter((c) => c.role === 'roof').length : 0;
+    // 作業の場（サエ家の南面の前）
+    const site = ROOF_DAY_SITE;
+    this.audio.setWork(workSound({ distance: Math.hypot(this.player.x - site.x, this.player.z - site.z), roofWorkers, indoor }));
+    const steps = this.playerView.consumeSteps();
+    if (steps > 0 && mode === 'explore') {
+      const running = this.input.isDown('ShiftLeft') || this.input.isDown('ShiftRight');
+      this.audio.footstep(footstepSurface({ x: this.player.x, z: this.player.z, indoor }), running);
+    }
+    this.audio.update();
+  }
+
+  private toggleMute(): void {
+    const muted = !this.settingsStore.value.muted;
+    this.changeSettings({ muted });
+    if (this.uiMode !== 'title') this.toasts.push('音', muted ? '音を消した（M でもとに戻す）' : '音を出した');
+  }
+
+  // ───────── 設定（Phase 6） ─────────
+
+  private changeSettings(patch: Partial<Settings>): void {
+    const ok = this.settingsStore.update(patch);
+    const s = this.settingsStore.value;
+    this.applySettings(s);
+    this.settingsView.update(s);
+    if (!ok && this.uiMode === 'settings') this.settingsView.setStatus('この環境では設定を保存できない（この回だけ反映する）。');
+  }
+
+  private applySettings(s: Settings): void {
+    this.audio.setVolumes(effectiveVolumes(s));
+    this.cameraRig.settings = orbitSettingsFor(s.lookSensitivity);
+    this.dialogueBox.charsPerSecond = CHARS_PER_SECOND[s.textSpeed];
+    this.hud.setHelpVisible(s.showControls);
+    if (!s.showHints) this.hud.setHint(null);
+  }
+
+  // ───────── 画面の行き来（Phase 6） ─────────
+
+  /** 設定・選んだことの記録・解説を開く。閉じたら今の画面（タイトル・ポーズ・結果・エンディング）に戻る。 */
+  private openSubScreen(action: 'openSettings' | 'openHistory' | 'openExplain'): void {
+    const from = this.uiMode;
+    this.dispatch(action);
+    if (this.uiMode !== from) this.returnTo = RETURN_ACTION[from] ? from : null;
+  }
+
+  private closeSubScreen(): void {
+    const back = this.returnTo;
+    this.returnTo = null;
+    this.dispatch('close');
+    if (!back) return;
+    if (back === 'title') this.showTitle();
+    else {
+      const action = RETURN_ACTION[back];
+      if (action) this.dispatch(action);
+    }
+  }
+
+  /** 時間の経過の画面を出す。閉じたら then を実行する。 */
+  private showTransition(content: TransitionContent, then: () => void): void {
+    this.dispatch('openTransition');
+    if (this.uiMode !== 'transition') return;
+    this.afterTransition = then;
+    this.transitionView.show(content);
+    this.sound('transition');
+  }
+
+  private finishTransition(): void {
+    if (this.uiMode !== 'transition') return;
+    const then = this.afterTransition;
+    this.afterTransition = null;
+    this.dispatch('close');
+    this.flashFade();
+    then?.();
+  }
+
+  /** 屋根葺きの日の短い見渡し（数秒。決定キー・Esc で飛ばせる）。 */
+  private startCinematic(): void {
+    this.dispatch('openCinematic');
+    if (this.uiMode !== 'cinematic') return;
+    this.cinematicEnd = performance.now() + ROOF_DAY_SHOT.seconds * 1000;
+    this.cameraRig.reset(ROOF_DAY_SHOT.yaw);
+    this.cameraRig.setFraming(ROOF_DAY_SHOT.pitch, ROOF_DAY_SHOT.distance);
+  }
+
+  private endCinematic(): void {
+    this.cinematicEnd = 0;
+    this.applyFraming();
+    this.cameraRig.reset(this.player.heading);
+    this.flashFade();
+  }
+
+  /** 屋内・屋外に合わせた最初の構図にする。 */
+  private applyFraming(): void {
+    const f = this.world.indoor ? INDOOR_FRAMING : OUTDOOR_FRAMING;
+    this.cameraRig.setFraming(f.pitch, f.distance);
+  }
+
+  // ───────── タイトル（Phase 6） ─────────
+
+  private showTitle(): void {
+    this.dispatch('openTitle');
+    if (this.uiMode !== 'title') return;
+    const result = this.saveStore.load();
+    this.titleSave = result;
+    let status = '';
+    if (result.ok) {
+      const when = new Date(result.save.savedAt);
+      const chapter = result.save.story.chapter;
+      status = `前回の記録：${Number.isNaN(when.getTime()) ? '日時不明' : when.toLocaleString('ja-JP')}（${CHAPTER_LABEL[chapter] ?? ''}）`;
+    } else if (result.reason === 'corrupt' || result.reason === 'unsupported') {
+      status =
+        (result.reason === 'corrupt' ? '保存されていた記録が壊れていたため、読み込めませんでした。' : 'この版では読めない記録でした。') +
+        '読めなかった記録は消さずに別名で残してあります。';
+    } else if (result.reason === 'unavailable') {
+      status = 'この環境では進み具合を記録できません（遊ぶことはできます）。';
+    }
+    this.titleScreen.show({
+      items: [
+        { id: 'continue', label: 'つづきから', disabled: !result.ok },
+        { id: 'new', label: 'はじめから' },
+        { id: 'settings', label: '設定' },
+        { id: 'explain', label: '史実と創作について' },
+      ],
+      defaultId: result.ok ? 'continue' : 'new',
+      ...(status ? { status } : {}),
+    });
+    this.cameraRig.reset(0);
+    this.cameraRig.setFraming(TITLE_CAMERA.pitch, TITLE_CAMERA.distance);
+  }
+
+  private onTitleItem(id: string): void {
+    this.sound('confirm');
+    const result = this.titleSave;
+    switch (id) {
+      case 'continue':
+        if (!result?.ok) return;
+        this.applySave(result.save);
+        this.dispatch('close');
+        return;
+      case 'new':
+        if (result?.ok) {
+          this.showNotice(
+            {
+              title: 'はじめから遊びますか？',
+              body: '前回の記録は、次に自動で記録されるときに上書きされます。',
+              items: [
+                { id: 'no', label: 'やめる' },
+                { id: 'yes', label: 'はじめから遊ぶ' },
+              ],
+              defaultId: 'no',
+            },
+            { no: () => this.showTitle(), yes: () => this.startNewGame() },
+          );
+        } else this.startNewGame();
+        return;
+      case 'settings':
+        return this.openSubScreen('openSettings');
+      case 'explain':
+        return this.openSubScreen('openExplain');
+    }
+  }
+
+  /** 最初から始める（導入の画面 → 村へ）。 */
+  private startNewGame(): void {
+    if (this.uiMode === 'title') this.dispatch('close');
+    this.resetToNewGame();
+    this.showTransition(OPENING, () => undefined);
+  }
+
 
   private handleDialogueInput(): void {
     const input = this.input;
@@ -471,7 +987,10 @@ export class Game {
     // 選択肢が出た直後はキーでの決定を受け付けない（文字送りを飛ばすつもりの操作が選択にならないように）
     const decideLocked = choices > 0 && !box.choicesReady;
     if (input.wasPressed('KeyE') || input.wasPressed('Space') || input.wasPressed('Enter') || input.wasPressed('NumpadEnter')) {
-      if (!decideLocked) this.confirmDialogue();
+      if (!decideLocked) {
+        if (choices > 0) this.sound('confirm');
+        this.confirmDialogue();
+      }
       return;
     }
     if (choices === 0) return;
@@ -480,6 +999,7 @@ export class Game {
     if (decideLocked) return;
     for (let i = 0; i < Math.min(choices, 9); i++) {
       if (input.wasPressed(`Digit${i + 1}`) || input.wasPressed(`Numpad${i + 1}`)) {
+        this.sound('confirm');
         this.interaction.choose(i);
         return;
       }
@@ -524,12 +1044,14 @@ export class Game {
     this.player.velocityZ = 0;
     this.dispatch('dialogueStarted');
     this.hud.setDialogueMode(true);
+    this.markHint('talk');
 
     const partner = this.interaction.partner;
     if (partner?.id !== id || partner.kind !== 'npc') return;
     // 住民との会話は、相手と自分が斜めに見える構図へ寄せる（設計書 L：会話時は人物が見やすい構図へ）
     const orbit = this.cameraRig.orbit;
-    this.savedCamera = { pitch: orbit.targetPitch, distance: orbit.targetDistance };
+    this.savedCamera = { pitch: orbit.targetPitch, distance: orbit.targetDistance, lookHeight: this.cameraRig.lookHeight };
+    this.cameraRig.lookHeight = Math.min(this.cameraRig.lookHeight, TALK_CAMERA.lookHeight);
     const toPartner = Math.atan2(partner.position.x - this.player.x, partner.position.z - this.player.z);
     // 今のカメラ位置に近い側から回り込む
     const side = wrapAngle(orbit.yaw - toPartner) >= 0 ? 1 : -1;
@@ -562,15 +1084,16 @@ export class Game {
     this.interaction.setIndoor(indoor);
     this.skyLight.intensity = this.skyBase * (indoor ? INDOOR_SKY_LIGHT_SCALE : 1);
     const orbit = this.cameraRig.orbit;
+    // 室内：近め・やや見下ろし、注視点を低く、壁際では横へ回り込む（Phase 6）。屋外に出たら元の構図に戻す
+    this.cameraRig.avoidWalls = indoor;
+    this.cameraRig.lookHeight = indoor ? 1.45 : OUTDOOR_LOOK_HEIGHT;
     if (indoor) {
       this.outdoorCamera = { pitch: orbit.targetPitch, distance: orbit.targetDistance };
       this.cameraRig.limits = INDOOR_ORBIT_LIMITS;
-      orbit.targetPitch = orbit.pitch = 0.42;
-      orbit.targetDistance = orbit.distance = 3.8;
+      this.cameraRig.setFraming(INDOOR_FRAMING.pitch, INDOOR_FRAMING.distance);
     } else {
       this.cameraRig.limits = DEFAULT_ORBIT_LIMITS;
-      orbit.targetPitch = orbit.pitch = this.outdoorCamera?.pitch ?? 0.42;
-      orbit.targetDistance = orbit.distance = this.outdoorCamera?.distance ?? 10;
+      this.cameraRig.setFraming(this.outdoorCamera?.pitch ?? OUTDOOR_FRAMING.pitch, this.outdoorCamera?.distance ?? OUTDOOR_FRAMING.distance);
       this.outdoorCamera = null;
     }
   }
@@ -651,37 +1174,63 @@ export class Game {
 
   private decidePlan(): void {
     const planId = this.story.activePlanId();
+    const promisesBefore = this.story.allPromises().length;
+    // 決めた瞬間の手帳・意向・約束の通知は出さず、決定の知らせにまとめる（Phase 6）
+    this.quietNotices = true;
     const outcome = this.story.decidePlan({ source: '作業台で決めた' });
-    if (!outcome) return;
+    this.quietNotices = false;
+    if (!outcome || !planId) return;
+    this.sound('decide');
     this.saveGame();
     if (planId === 'roof') {
-      // 屋根葺き当日へ（章は決定の効果で進んでいる）
+      // 屋根葺きの日へ（章は決定の効果で進んでいる）。決めた時点では、まだ葺いていない
+      const decision = this.story.planDecision('roof');
+      const promises = this.story.allPromises().slice(promisesBefore);
+      const lines = [
+        decision ? `決めた段取り：${describePlan(this.story, decision.plan, 'roof')}` : '',
+        '関係する皆が承知し、屋根葺きの準備が整った。',
+        ...promises.map((p) => `約束を書き留めた：${p.content}`),
+      ].filter((l) => l !== '');
       this.placePlayerAt({ x: 1.5, z: 15.5, heading: Math.PI });
       this.showNotice(
-        {
-          title: '屋根葺きの日',
-          body: '決めた段取りで、屋根葺きの日が来た。\n村を歩いて、誰がどこで何をしているか見て回ろう。サエと話すと一日を終えられる。',
-          items: [{ id: 'ok', label: '村に出る' }],
-        },
-        { ok: () => undefined },
+        { title: '段取りが決まった', body: lines.join('\n'), items: [{ id: 'ok', label: '作業の日を迎える' }], solid: true },
+        { ok: () => this.beginRoofDay(outcome) },
       );
     } else {
       this.dispatch('openEnding');
     }
   }
 
+  /** 屋根葺きの日の朝：誰が来て、茅と足場がどうなっているかを短く示し、作業の場を見渡してから村へ。 */
+  private beginRoofDay(outcome: string): void {
+    const arrival = roofDayArrival(outcome);
+    this.roofDayElapsed = 0;
+    this.showTransition(
+      {
+        kicker: arrival && arrival.when !== '屋根葺きの日' ? arrival.when : 'その日',
+        title: '屋根葺きの日',
+        lines: [...(arrival?.lines ?? []), '村を歩いて、誰がどこで何をしているか見て回ろう。サエと話すと一日を終えられる。'],
+        button: '村に出る',
+      },
+      () => this.startCinematic(),
+    );
+  }
+
   /** 結果画面を閉じたとき。屋根葺きの日の結果なら、三年後（第3幕）へ進む。 */
   private onResultClosed(): void {
     this.dispatch('close');
     if (this.story.chapter !== 'roofDay') return;
-    const meanwhile = shownLines(this.story, MEANWHILE).join('\n');
-    this.showNotice(
+    const meanwhile = shownLines(this.story, MEANWHILE);
+    // 暗転の間に村を三年後の様子にしておき、明けたら村に出る
+    this.enterChapter3();
+    this.showTransition(
       {
-        title: 'それから三年後の秋',
-        body: `${meanwhile}\n今度は、伊助家の屋根を葺き替える時が来た。`,
-        items: [{ id: 'ok', label: '村に出る' }],
+        kicker: 'それから',
+        title: '三年後の秋',
+        lines: [...meanwhile, '今度は、伊助家の屋根を葺き替える時が来た。'],
+        button: '村に出る',
       },
-      { ok: () => this.enterChapter3() },
+      () => undefined,
     );
   }
 
@@ -698,21 +1247,30 @@ export class Game {
     const decision = this.story.planDecision('isukeRoof');
     const ending = decision ? ENDINGS[decision.outcome] : undefined;
     const roof = this.story.planDecision('roof');
-    const added = ledgerEntries(this.story).filter((e) => e.id === 'L3' || e.id === 'L4');
     const name = (h: string) => HOUSEHOLDS[h]?.name ?? h;
+    const settle = (s: string) => (s === 'settled' ? '返し 済' : s === 'open' ? '返し まだ' : '取り決めなし');
+    // 結帳：十五年前の伊助家の手伝い（返したかどうか）と、この物語で書き加えられた記録
+    const records = ledgerEntries(this.story).flatMap((e) =>
+      e.items
+        .filter((i) => e.id === 'L3' || e.id === 'L4' || i.id === 'L1-isuke')
+        .map((i) => `${e.when}：${name(i.from)} → ${name(i.to)}　${i.detail}（${settle(i.settlement)}）`),
+    );
+    const promises = buildNotebook(this.story, JOURNAL_SOURCES).promises.map((p) => ({ text: `${p.from} → ${p.to}：${p.content}`, kept: p.kept }));
     return {
       code: ending?.code ?? '',
       title: ending?.title ?? '',
       story: ending ? [...shownLines(this.story, MEANWHILE), ...shownLines(this.story, ending.story)] : [],
+      achieved: ending ? shownLines(this.story, ending.achieved) : [],
+      remains: ending ? shownLines(this.story, ending.remains) : [],
       choices: [
         { label: '第1幕', text: act1Summary(roof?.outcome) },
         { label: '第3幕', text: decision ? describePlan(this.story, decision.plan, 'isukeRoof') : '—' },
       ],
-      records: added.flatMap((e) =>
-        e.items.map((i) => `${e.when}：${name(i.from)} → ${name(i.to)}　${i.detail}（${i.settlement === 'settled' ? '返し 済' : i.settlement === 'open' ? '返し まだ' : '取り決めなし'}）`),
-      ),
+      records,
+      promises,
     };
   }
+
 
   /**
    * 決めた計画の結果を村の様子に反映する（屋根の見た目・はさ掛け・住民の立ち位置と立ち姿・
@@ -729,6 +1287,8 @@ export class Game {
     this.world.setRoofState('isuke', roofs.isuke);
     this.world.setHarvestDone(def?.harvestDone ?? false);
     this.roofDay.show(chapter === 'roofDay' && roof ? roofDayStage(roof.outcome) : null);
+    // 作業の進み具合の見た目は屋根葺きの日だけ（それ以外の章では屋根の状態の見た目に戻す）
+    if (chapter !== 'roofDay') this.world.setRoofWork('sae', null);
     for (const npc of NPCS) {
       const placement = def?.placements[npc.character] ?? null;
       this.interaction.setPlacement(npc.id, placement);
@@ -756,6 +1316,7 @@ export class Game {
     const orbit = this.cameraRig.orbit;
     orbit.targetPitch = this.savedCamera.pitch;
     orbit.targetDistance = this.savedCamera.distance;
+    this.cameraRig.lookHeight = this.savedCamera.lookHeight;
     this.savedCamera = null;
   }
 
@@ -777,47 +1338,21 @@ export class Game {
     return this.saveStore.save(createSave(this.story.snapshot(), this.player));
   }
 
-  private checkSaveOnStart(): void {
-    const result = this.saveStore.load();
-    if (result.ok) {
-      const when = new Date(result.save.savedAt);
-      this.showNotice(
-        {
-          title: '前回の記録があります',
-          body: `記録した日時：${Number.isNaN(when.getTime()) ? '不明' : when.toLocaleString('ja-JP')}`,
-          items: [
-            { id: 'continue', label: '続きから' },
-            { id: 'new', label: '最初から（記録は次の自動記録で上書きされます）' },
-          ],
-          defaultId: 'continue',
-        },
-        { continue: () => this.applySave(result.save), new: () => this.resetToNewGame() },
-      );
-    } else if (result.reason === 'corrupt' || result.reason === 'unsupported') {
-      this.showNotice(
-        {
-          title: '記録を読み込めませんでした',
-          body:
-            (result.reason === 'corrupt' ? '保存されていた記録が壊れていました。' : 'この版では読めない記録でした。') +
-            '最初から始めます。読めなかった記録は消さずに別名で残してあります。',
-          items: [{ id: 'ok', label: '最初から始める' }],
-        },
-        { ok: () => undefined },
-      );
-    } else if (result.reason === 'unavailable') {
-      this.toasts.push('記録', 'この環境では進み具合を記録できません');
-    }
-  }
-
   private pauseContent(status = ''): MenuContent {
+    const decided = this.story.planDecision('roof') !== null;
+    const objective = currentObjective(this.story);
     return {
       title: 'ポーズ',
+      ...(objective ? { body: `いまできること：${objective}` } : {}),
       items: [
         { id: 'resume', label: '再開する［Esc］' },
         { id: 'notebook', label: '手帳を開く［Tab］' },
+        ...(decided ? [{ id: 'history', label: '選んだことの記録' }] : []),
+        { id: 'settings', label: '設定（音量・視点の感度など）' },
         { id: 'save', label: '記録する' },
         { id: 'load', label: '最後の記録から再開する' },
         { id: 'explain', label: '史実と創作について' },
+        { id: 'title', label: 'タイトルに戻る' },
         { id: 'new', label: '最初からやり直す' },
       ],
       defaultId: 'resume',
@@ -826,19 +1361,29 @@ export class Game {
   }
 
   private onPauseItem(id: string): void {
+    this.sound('confirm');
     switch (id) {
       case 'resume':
         return this.dispatch('close');
       case 'notebook':
         return this.dispatch('openNotebook');
       case 'explain':
-        return this.dispatch('openExplain');
+        return this.openSubScreen('openExplain');
+      case 'settings':
+        return this.openSubScreen('openSettings');
+      case 'history':
+        return this.openSubScreen('openHistory');
       case 'save': {
         const ok = this.saveGame();
         const time = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
         this.pauseMenu.setStatus(ok ? `記録しました（${time}）` : '記録できませんでした（保存領域を使えません）');
         return;
       }
+      case 'title':
+        // 今の位置も含めて記録してからタイトルへ（「つづきから」で同じ所から再開できる）
+        this.saveGame();
+        this.dispatch('close');
+        return this.showTitle();
       case 'load':
         return this.showNotice(
           {
@@ -863,7 +1408,7 @@ export class Game {
             ],
             defaultId: 'no',
           },
-          { no: () => undefined, yes: () => this.resetToNewGame() },
+          { no: () => undefined, yes: () => this.startNewGame() },
         );
     }
   }
@@ -914,12 +1459,15 @@ export class Game {
     this.placePlayer({ ...PLAYER_START.position, heading: PLAYER_START.yaw });
   }
 
+
   private placePlayer(p: { x: number; z: number; heading: number }): void {
     Object.assign(this.player, { x: p.x, z: p.z, heading: p.heading, velocityX: 0, velocityZ: 0 });
     this.player.y = this.world.groundHeight(p.x, p.z);
+    this.applyFraming();
     this.cameraRig.reset(p.heading);
     this.area = null;
     this.toasts.clear();
+    this.hideBark();
     this.notebookSeenOrder = buildNotebook(this.story, JOURNAL_SOURCES).latestOrder;
     this.refreshNotebookBadge();
   }
@@ -948,6 +1496,12 @@ export class Game {
     const view = this.interaction.view;
     const partner = this.interaction.partner;
     if (view && partner) {
+      // ページが変わったら、控えめに紙を送る音
+      const key = `${view.scriptId}:${view.nodeId}:${view.page}`;
+      if (key !== this.lastDialogueKey) {
+        if (this.lastDialogueKey !== '') this.sound('page');
+        this.lastDialogueKey = key;
+      }
       const speaker = view.speaker ? CHARACTERS[view.speaker as CharacterId]?.name ?? view.speaker : null;
       this.dialogueBox.show({
         key: `${view.scriptId}:${view.nodeId}:${view.page}`,
@@ -958,8 +1512,9 @@ export class Game {
         selected: this.interaction.selected,
       });
       this.dialogueBox.update(dt);
-    } else if (this.dialogueBox.visible) {
-      this.dialogueBox.hide();
+    } else {
+      this.lastDialogueKey = '';
+      if (this.dialogueBox.visible) this.dialogueBox.hide();
     }
 
     const target = this.uiMode === 'explore' ? this.interaction.target : null;

@@ -5,6 +5,7 @@
  * - Phase 2（[P2]）：手帳、結帳、ポーズ、会話の中断、記録（保存・続きから・壊れた記録・やり直し）
  * - Phase 5.5（[P5.5]）：サエ家の出入り（許しの前後）、室内の移動とカメラ、結帳、室内での記録・読込、橋の欄干（実際に歩かせる）、橋の通行
  * - Phase 5（[P5]）：住民の待機の型、5 地点、すべての住民・調べられる物の操作、屋根葺きの日（計画ごとの人・役割・茅の山・足場、運ぶ人の動きと立ち止まり）、第3幕の見た目（杖・屋根）、記録の復元、描画呼び出し数
+ * - Phase 6（[P6]）：タイトル画面・導入・操作の手引き、決定時の知らせと屋根葺きの日の朝・見渡し、選んだことの記録、三年後の時間経過、エンディングの振り返り、史実と創作（4 区分と出典）、音（開始・ミュート）、設定の保存、室内の壁際のカメラ、作業台の見比べ、屋根葺きの日のひと言・作業の進み具合・作業の音、設定と記録の画面の大きさ
  * - Phase 4（[P4]）：宗平・ミネを含む作業台（項目の出し分け）、相談と見直し、屋根葺き当日、三年後、第3幕（Q1〜Q3）、エンディング、史実と創作の解説、記録の復元、各画面の大きさ（1280x720・1024x640）
  *
  *   npm run test:browser
@@ -41,6 +42,15 @@ page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
 page.on('requestfailed', (r) => logs.push(`[requestfailed] ${r.url()}`));
 
 const results = [];
+// 途中で例外が起きても、それまでの結果と画面を残し、テスト用に起動したブラウザだけを閉じる
+process.on('uncaughtException', async (e) => {
+  console.log(results.join('\n'));
+  console.log(`\nCRASH: ${e?.stack ?? e}`);
+  await page.screenshot({ path: `${OUT}/crash.png` }).catch(() => undefined);
+  await browser.close().catch(() => undefined);
+  await server.close().catch(() => undefined);
+  process.exit(1);
+});
 const check = (name, ok, detail = '') => {
   const line = `${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  — ' + detail : ''}`;
   results.push(line);
@@ -61,8 +71,70 @@ const state = () =>
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const hold = async (key, ms) => { await page.keyboard.down(key); await wait(ms); await page.keyboard.up(key); await wait(300); };
 
+// Phase 6：タイトル画面・時間経過の画面
+const gameMode = () => page.evaluate(() => window.__yui?.mode ?? null);
+const waitMode = async (m, timeoutMs = 10000) => {
+  const t0 = Date.now();
+  let cur = await gameMode();
+  while (cur !== m && Date.now() - t0 < timeoutMs) { await wait(100); cur = await gameMode(); }
+  return cur;
+};
+/** 時間経過の画面（行を出し切る → 閉じる）と短い演出（見渡し）を、決定キーで進める。 */
+const skipScenes = async () => {
+  for (let i = 0; i < 40; i++) {
+    const m = await gameMode();
+    if (m === 'transition' || m === 'cinematic') { await page.keyboard.press('Enter'); await wait(250); }
+    else if (m !== null) return m;
+    else await wait(100);
+  }
+  return gameMode();
+};
+/** タイトル画面から始める（new：はじめから／continue：つづきから）。 */
+const startFromTitle = async (choice = 'new') => {
+  await waitMode('title');
+  await page.click(`.title-layer .title-item[data-id="${choice}"]`);
+  await wait(200);
+  if (choice === 'new' && (await gameMode()) === 'notice') { await page.click('.notice-layer .menu-item[data-id="yes"]'); await wait(200); }
+  await skipScenes();
+  return waitMode('explore');
+};
+const titleState = () =>
+  page.evaluate(() => {
+    const q = (s) => document.querySelector(s);
+    const vis = (s) => { const e = q(s); return !!e && !e.hidden; };
+    return {
+      mode: window.__yui?.mode ?? null,
+      title: vis('.title-layer'),
+      items: [...document.querySelectorAll('.title-item')].map((b) => `${b.dataset.id}${b.disabled ? ':disabled' : ''}`),
+      status: q('.title-status')?.textContent ?? '',
+      controls: q('.title-controls')?.textContent ?? '',
+      loading: !!q('#loading'),
+      hudHidden: q('#hud')?.classList.contains('is-title') ?? false,
+    };
+  });
+
 await page.goto(url, { waitUntil: 'networkidle0' });
 await wait(2500);
+
+// ── Phase 6：ローディング → タイトル画面 → 導入 → 村 ──
+const t6a = await titleState();
+check('[P6] 起動するとタイトル画面が出る（ローディング表示は消えている）', t6a.mode === 'title' && t6a.title && !t6a.loading, JSON.stringify(t6a));
+check('[P6] 記録がないとき「つづきから」は選べず、「はじめから」「設定」「史実と創作について」がある',
+  JSON.stringify(t6a.items) === JSON.stringify(['continue:disabled', 'new', 'settings', 'explain']), JSON.stringify(t6a.items));
+check('[P6] タイトル画面に基本操作（WASD・Shift・ドラッグ・E・Tab・Esc）が書いてあり、探索用の表示は隠れている',
+  ['W A S D', 'Shift', 'ドラッグ', 'E', 'Tab', 'Esc'].every((k) => t6a.controls.includes(k)) && t6a.hudHidden, t6a.controls);
+await page.screenshot({ path: `${OUT}/shot-00-title.png` });
+await page.keyboard.press('Escape');
+await wait(300);
+check('[P6] タイトル画面は Esc で閉じない', (await gameMode()) === 'title');
+await page.click('.title-layer .title-item[data-id="new"]');
+const t6b = await page.evaluate(() => ({ mode: window.__yui.mode, title: document.querySelector('.transition-title')?.textContent ?? '' }));
+check('[P6] 「はじめから」で導入（時間と場面の説明）が出る', t6b.mode === 'transition' && /屋根葺きを控えた秋/.test(t6b.title), JSON.stringify(t6b));
+await wait(600);
+await page.screenshot({ path: `${OUT}/shot-00b-opening.png` });
+await skipScenes();
+const t6c = await page.evaluate(() => ({ mode: window.__yui.mode, hint: document.querySelector('.hud-hint')?.textContent ?? '', hintVisible: !document.querySelector('.hud-hint')?.hidden }));
+check('[P6] 導入を進めると村に出て、最初の操作の手引き（WASD で歩く）が出る', t6c.mode === 'explore' && t6c.hintVisible && /歩く/.test(t6c.hint), JSON.stringify(t6c));
 
 const s0 = await state();
 check('ゲームが起動し状態を取得できる', !!s0, JSON.stringify(s0));
@@ -504,13 +576,15 @@ await press2('Escape', (s) => !s.pause);
 const beforeReload = await g2();
 await page.reload({ waitUntil: 'networkidle0' });
 await wait(2500);
-const r1 = await waitFor2((s) => s.notice);
-check('[P2] 再読み込みすると「前回の記録があります」が出る', r1.notice && /前回の記録/.test(r1.noticeTitle) && r1.mode === 'notice', r1.noticeTitle);
+await waitMode('title');
+const r1 = await titleState();
+check('[P2] 再読み込みすると、タイトル画面に「前回の記録」が出て「つづきから」を選べる', r1.mode === 'title' && /前回の記録/.test(r1.status) && r1.items.includes('continue'), r1.status);
 await page.screenshot({ path: `${OUT}/shot-23-continue.png` });
-const r1b = await press2('Escape', () => false, 800);
-check('[P2] お知らせは Esc で誤って閉じない', r1b.notice && r1b.mode === 'notice');
-await page.click('.notice-layer .menu-item[data-id="continue"]');
-const r2 = await waitFor2((s) => !s.notice);
+await page.keyboard.press('Escape');
+await wait(600);
+check('[P2] タイトル画面は Esc で誤って閉じない', (await gameMode()) === 'title');
+await page.click('.title-layer .title-item[data-id="continue"]');
+const r2 = await waitFor2((s) => s.mode === 'explore');
 check('[P2] 「続きから」で記録した状態に戻る',
   r2.mode === 'explore' && JSON.stringify(r2.learned) === JSON.stringify(beforeReload.learned) && JSON.stringify(r2.met) === JSON.stringify(beforeReload.met) &&
   Math.hypot(r2.player.x - beforeReload.player.x, r2.player.z - beforeReload.player.z) < 0.5,
@@ -521,10 +595,11 @@ check('[P2] 読み込んだ状態から目的表示が復元される', r2.objec
 await page.evaluate(() => localStorage.setItem('yui-no-yakusoku:save:1', '{"format":"yui-no-yakusoku-save","version":1,"story":'));
 await page.reload({ waitUntil: 'networkidle0' });
 await wait(2500);
-const b1 = await waitFor2((s) => s.notice);
-check('[P2] 壊れた記録は読み込まずに知らせる', /読み込めませんでした/.test(b1.noticeTitle), b1.noticeTitle);
-await page.click('.notice-layer .menu-item[data-id="ok"]');
-const b2 = await waitFor2((s) => !s.notice);
+await waitMode('title');
+const b1 = await titleState();
+check('[P2] 壊れた記録は読み込まずに知らせる（タイトル画面。「つづきから」は選べない）', /読み込めませんでした/.test(b1.status) && b1.items.includes('continue:disabled'), b1.status);
+await startFromTitle('new');
+const b2 = await waitFor2((s) => s.mode === 'explore');
 const kept = await page.evaluate(() => [localStorage.getItem('yui-no-yakusoku:save:1'), localStorage.getItem('yui-no-yakusoku:save:1:corrupt')]);
 check('[P2] 壊れた記録は別名で残し、最初から遊べる', b2.mode === 'explore' && b2.learned.length === 0 && kept[0] === null && typeof kept[1] === 'string');
 const b3 = await holdUntil(['KeyW'], (s) => s.z < 29, 8000);
@@ -537,7 +612,8 @@ await waitFor2((s) => s.pause);
 await page.click('.pause-layer .menu-item[data-id="new"]');
 await waitFor2((s) => s.notice);
 await page.click('.notice-layer .menu-item[data-id="yes"]');
-const nw = await waitFor2((s) => !s.notice);
+await skipScenes();
+const nw = await waitFor2((s) => !s.notice && s.mode === 'explore');
 check('[P2] 「最初からやり直す」で状態が初期化される', nw.mode === 'explore' && nw.learned.length === 0 && nw.objective === '広場にいるトキに話しかける');
 
 // ───────── Phase 4：宗平・ミネを含む計画、屋根葺き当日、第3幕、エンディング ─────────
@@ -687,10 +763,29 @@ check('[P4] 4人が承諾すると決められ、承諾を得た案に並ぶ', q
 await page.click('.plan-decide');
 await waitP4((s) => s.notice);
 await page.click('.notice-layer .menu-item[data-id="yes"]');
-const q4d1 = await waitP4((s) => s.notice && /屋根葺きの日/.test(s.noticeTitle));
-check('[P4] 決めると「屋根葺きの日」に移る', q4d1.chapter === 'roofDay' && /屋根葺きの日/.test(q4d1.noticeTitle), q4d1.noticeTitle);
+const q4d1 = await waitP4((s) => s.notice && /段取りが決まった/.test(s.noticeTitle));
+const q4d1body = await page.evaluate(() => document.querySelector('.notice-layer .menu-body')?.textContent ?? '');
+const q4d1toasts = await page.evaluate(() => [...document.querySelectorAll('.toast')].map((t) => t.textContent).join(' / '));
+check('[P6] 決めた時点では「段取りが決まった・準備が整った」と出て、「葺き替えた」とは出ない（通知にも出ない）',
+  q4d1.chapter === 'roofDay' && /準備が整った/.test(q4d1body) && !/葺き替え/.test(q4d1body + q4d1toasts) &&
+  !(await page.evaluate(() => ['renewed', 'partial'].includes(window.__yui.story.currentStage('sae.roof')))),
+  `${q4d1body} | ${q4d1toasts}`);
+await page.screenshot({ path: `${OUT}/shot-50-decided.png` });
 await page.click('.notice-layer .menu-item[data-id="ok"]');
-const q4d2 = await waitP4((s) => !s.notice);
+const q4d1b = await page.evaluate(() => ({ mode: window.__yui.mode, title: document.querySelector('.transition-title')?.textContent ?? '', lines: document.querySelector('.transition-lines')?.textContent ?? '' }));
+check('[P6] 「作業の日を迎える」で、屋根葺きの日の朝の様子（来ている人・茅・足場）が示される',
+  q4d1b.mode === 'transition' && /屋根葺きの日/.test(q4d1b.title) && /宗平さん/.test(q4d1b.lines) && /ミネさんの茅/.test(q4d1b.lines) && /南面いっぱい/.test(q4d1b.lines), q4d1b.lines);
+// 低 FPS では短い間隔の 2 回の押下が 1 フレームにまとまるので、画面の変化を確かめながら 1 回ずつ押す
+for (let i = 0; i < 20 && (await gameMode()) === 'transition'; i++) {
+  await page.keyboard.press('Enter');
+  await wait(400);
+}
+const q4d1c = await waitMode('cinematic', 3000);
+check('[P6] 村に出る前に、作業の場を短く見渡す（数秒）', q4d1c === 'cinematic', String(q4d1c));
+await page.screenshot({ path: `${OUT}/shot-50b-roofday-shot.png` });
+const q4d1d = await waitMode('explore', 8000);
+check('[P6] 見渡しは数秒で終わり、自分で歩ける', q4d1d === 'explore', String(q4d1d));
+const q4d2 = await waitP4((s) => !s.notice && s.mode === 'explore');
 check('[P4] 当日は村の人たちが手伝いに来て、宗平とミネがサエ家の前にいる',
   q4d2.villagers && Math.abs(q4d2.where.sohei[0] + 4.8) < 0.01 && Math.abs(q4d2.where.mine[0] - 8.2) < 0.01, JSON.stringify(q4d2.where));
 await page.evaluate(() => { const g = window.__yui; g.player.x = 0; g.player.z = 22; const o = g.cameraRig.orbit; o.yaw = o.targetYaw = Math.PI; o.pitch = o.targetPitch = 0.35; o.distance = o.targetDistance = 16; });
@@ -705,12 +800,25 @@ check('[P4] サエと話して一日を終えると、結果画面が出る（�
 const q4rl = await layout('.result-layer .result', '.result-layer .result-block li', '.result-layer .result-body');
 check('[P4] 結果画面は画面に収まり、本文は16px以上', fits(q4rl, 16), JSON.stringify(q4rl));
 await page.screenshot({ path: `${OUT}/shot-52-result-p4.png` });
+check('[P6] 一日を終えてはじめて、手帳に「葺き替えた」が記録される',
+  await page.evaluate(() => ['renewed', 'partial'].includes(window.__yui.story.currentStage('sae.roof'))));
+await page.click('.result-layer .plan-pick');
+const q4h1 = await page.evaluate(() => ({ mode: window.__yui.mode, text: document.querySelector('.history-layer .result-body')?.textContent ?? '' }));
+check('[P6] 結果画面から「選んだことの記録」を開ける（選んだこと・承知した人・結果）',
+  q4h1.mode === 'history' && /選んだこと/.test(q4h1.text) && /承知した/.test(q4h1.text) && /その結果/.test(q4h1.text), q4h1.text.slice(0, 120));
+await page.screenshot({ path: `${OUT}/shot-52b-history.png` });
+await page.keyboard.press('Escape');
+await wait(300);
+check('[P6] 記録を閉じると結果画面に戻る', (await gameMode()) === 'result');
 await page.keyboard.press('Enter');
-const q4d4 = await waitP4((s) => s.notice && /三年後/.test(s.noticeTitle));
-check('[P4] 結果の後、「それから三年後の秋」に移り、三年のあいだのことが示される', /三年後/.test(q4d4.noticeTitle), q4d4.noticeTitle);
+await waitMode('transition');
+await wait(1500);
+const q4d4 = await page.evaluate(() => ({ mode: window.__yui.mode, title: document.querySelector('.transition-title')?.textContent ?? '', lines: document.querySelector('.transition-lines')?.textContent ?? '', chapter: window.__yui.story.chapter }));
+check('[P4] 結果の後、暗転して「三年後の秋」に移り、三年のあいだのことが一行ずつ示される',
+  /三年後/.test(q4d4.title) && /三年前の秋/.test(q4d4.lines) && /伊助家の屋根/.test(q4d4.lines), JSON.stringify(q4d4));
 await page.screenshot({ path: `${OUT}/shot-53-three-years.png` });
-await page.click('.notice-layer .menu-item[data-id="ok"]');
-const q4c1 = await waitP4((s) => !s.notice && s.chapter === 'ch3');
+await skipScenes();
+const q4c1 = await waitP4((s) => !s.notice && s.chapter === 'ch3' && s.mode === 'explore');
 check('[P4] 第3幕：サエ家の屋根は葺き替え後、伊助家の屋根は傷んだ見た目になる', q4c1.saeRoof !== roofBefore && q4c1.isukeRoof !== null && q4c1.isukeRoof !== q4c1.saeRoof, `${q4c1.saeRoof?.toString(16)} / ${q4c1.isukeRoof?.toString(16)}`);
 
 // ── 第3幕 ──
@@ -738,12 +846,24 @@ check('[P4] エンディングで、第1幕・第3幕の選択と結帳に残っ
 const q4el = await layout('.ending-layer .result', '.ending-layer .result-block li', '.ending-layer .result-body');
 check('[P4] エンディング画面は画面に収まる', fits(q4el, 16), JSON.stringify(q4el));
 await page.screenshot({ path: `${OUT}/shot-54-ending.png` });
-await page.click('.ending-layer .plan-pick');
+check('[P6] エンディングは点数ではなく、実現したこと・残ったこと・約束のゆくえで振り返る',
+  /実現したこと/.test(q4e1.endingText) && /残ったこと/.test(q4e1.endingText) && /約束のゆくえ/.test(q4e1.endingText) && /果たした/.test(q4e1.endingText) && !/点数|ランク/.test(q4e1.endingText));
+await page.click('.ending-layer [data-action="history"]');
+const q4h2 = await page.evaluate(() => ({ mode: window.__yui.mode, acts: [...document.querySelectorAll('.history-act')].map((a) => a.dataset.plan) }));
+check('[P6] エンディングから「選んだことの記録」を開くと、第1幕と第3幕の両方が並ぶ', q4h2.mode === 'history' && JSON.stringify(q4h2.acts) === JSON.stringify(['roof', 'isukeRoof']), JSON.stringify(q4h2));
+await page.keyboard.press('Escape');
+await waitMode('ending');
+await page.click('.ending-layer [data-action="explain"]');
 const q4x1 = await waitP4((s) => s.explain);
-check('[P4] エンディングから「史実と創作について」を開ける', q4x1.explain && /合力/.test(q4x1.explainText) && /ゲーム用の創作/.test(q4x1.explainText) && /出典は確認中/.test(q4x1.explainText));
+check('[P4] エンディングから「史実と創作について」を開ける（事実・確認中・単純化・架空・創作した設定・出典）',
+  q4x1.explain && /資料で確認できる事実/.test(q4x1.explainText) && /合力/.test(q4x1.explainText) && /単純化/.test(q4x1.explainText) &&
+  /架空の人物/.test(q4x1.explainText) && /物語のために作った設定/.test(q4x1.explainText) && /出典は確認中/.test(q4x1.explainText) && /mlit\.go\.jp/.test(q4x1.explainText));
 await page.screenshot({ path: `${OUT}/shot-55-explain.png` });
 await page.keyboard.press('Escape');
-const q4x2 = await waitP4((s) => !s.explain);
+await waitMode('ending');
+check('[P6] 解説を閉じるとエンディングに戻る', (await gameMode()) === 'ending');
+await page.keyboard.press('Enter');
+const q4x2 = await waitP4((s) => !s.explain && s.mode === 'explore');
 check('[P4] 閉じると村に戻り、物語の終わりが目的に出る', q4x2.mode === 'explore' && /物語はここまで/.test(q4x2.objective) && q4x2.isukeRoof === q4x2.saeRoof, q4x2.objective);
 
 // ── 記録 → 再読み込み → 続きから ──
@@ -754,9 +874,8 @@ await waitFor2((s) => /記録しました/.test(s.pauseStatus));
 await press2('Escape', (s) => !s.pause);
 await page.reload({ waitUntil: 'networkidle0' });
 await wait(2500);
-await waitFor2((s) => s.notice);
-await page.click('.notice-layer .menu-item[data-id="continue"]');
-const q4r4 = await waitP4((s) => !s.notice);
+await startFromTitle('continue');
+const q4r4 = await waitP4((s) => !s.notice && s.mode === 'explore');
 check('[P4] 再読み込み後も、章・両方の計画・結末・屋根の見た目が戻る', q4r4.chapter === 'end' && q4r4.outcome === 'e1' && q4r4.isukeRoof === q4r4.saeRoof, `${q4r4.chapter} / ${q4r4.outcome}`);
 
 // ── 読みやすさ（Phase 3.5 の改善を維持） ──
@@ -803,6 +922,23 @@ for (const [w, h] of [[1280, 720], [1024, 640]]) {
   check(`[P4] ${q4tag} 史実と創作の解説：画面に収まる`, fits(q4xl, 16), JSON.stringify(q4xl));
   await page.keyboard.press('Escape');
   await waitP4((s) => !s.explain);
+  // Phase 6：解説を閉じるとポーズに戻る。設定・選んだことの記録も画面に収まる
+  await waitMode('pause');
+  await page.click('.pause-layer .menu-item[data-id="settings"]');
+  await waitMode('settings');
+  const q6st = await layout('.settings-panel', '.settings-label', '.settings-panel');
+  check(`[P6] ${q4tag} 設定：画面に収まり、文字は16px以上`, fits(q6st, 16), JSON.stringify(q6st));
+  if (w === 1280) await page.screenshot({ path: `${OUT}/shot-57-settings.png` });
+  await page.keyboard.press('Escape');
+  await waitMode('pause');
+  await page.click('.pause-layer .menu-item[data-id="history"]');
+  await waitMode('history');
+  const q6hs = await layout('.history-layer .result', '.history-layer .result-block li', '.history-layer .result-body');
+  check(`[P6] ${q4tag} 選んだことの記録：画面に収まる`, fits(q6hs, 16), JSON.stringify(q6hs));
+  await page.keyboard.press('Escape');
+  await waitMode('pause');
+  await page.keyboard.press('Escape');
+  await waitMode('explore');
 }
 await page.setViewport({ width: 1280, height: 720 });
 await wait(600);
@@ -811,6 +947,7 @@ await wait(600);
 await page.evaluate(() => localStorage.clear());
 await page.reload({ waitUntil: 'networkidle0' });
 await wait(2500);
+await startFromTitle('new');
 await page.mouse.click(640, 360);
 
 const p5 = () =>
@@ -868,6 +1005,8 @@ const decideRoofState = (plan) =>
 const closeNoticeOk = async () => {
   await waitP5((s) => s.mode === 'notice');
   await page.click('.notice-layer .menu-item[data-id="ok"]');
+  // Phase 6：屋根葺きの日の朝の様子（時間経過の画面）と、短い見渡しを進める
+  await skipScenes();
   await waitP5((s) => s.mode === 'explore');
 };
 
@@ -939,6 +1078,7 @@ for (const [id, plan] of Object.entries(P5_PLANS)) {
   await page.evaluate(() => localStorage.clear());
   await page.reload({ waitUntil: 'networkidle0' });
   await wait(2000);
+  await startFromTitle('new');
   const decided = await decideRoofState(plan);
   await closeNoticeOk();
   const s = await waitP5((v) => v.roofDayVisible);
@@ -1036,7 +1176,7 @@ await page.screenshot({ path: `${OUT}/shot-62-p5-ch3-sae.png` });
 await page.evaluate(() => window.__yui.saveGame());
 await page.reload({ waitUntil: 'networkidle0' });
 await wait(2000);
-await page.click('.notice-layer .menu-item[data-id="continue"]');
+await startFromTitle('continue');
 const q5r = await waitP5((s) => s.mode === 'explore' && s.chapter === 'ch3');
 check('[P5] 再読み込み後も、第3幕の屋根の見た目と、サエの立ち姿が戻る',
   q5r.roofs.sae === 'renewed' && q5r.roofs.isuke === 'worn' && q5r.styles.sae === 'cane' && !q5r.roofDayVisible, JSON.stringify({ roofs: q5r.roofs, styles: q5r.styles }));
@@ -1079,7 +1219,7 @@ check('[P5] 再読み込み後も、第3幕の屋根の見た目と、サエの�
   await page.evaluate(() => window.__yui.saveGame());
   await page.reload({ waitUntil: 'networkidle0' });
   await wait(2000);
-  await page.click('.notice-layer .menu-item[data-id="continue"]');
+  await startFromTitle('continue');
   await wait(800);
   const in2 = await pos();
   check('[P5.5] 室内で記録して読み込むと、室内の同じ位置から再開する', in1.indoor && in2.indoor && Math.abs(in2.x + 5) < 0.3 && Math.abs(in2.z + 2) < 0.3, JSON.stringify({ in1, in2 }));
@@ -1095,6 +1235,135 @@ check('[P5] 再読み込み後も、第3幕の屋根の見た目と、サエの�
   const in4 = await leaveSaeHouse();
   check('[P5.5] 読み込んだ後も、室内から外に出られる', !in4.indoor && in4.z > 7, JSON.stringify(in4));
   await page.screenshot({ path: `${OUT}/shot-63-p55-exit.png` });
+}
+
+// ───────── Phase 6：音・設定の保存・室内のカメラ・作業台の見比べ・屋根葺きの日の演出 ─────────
+{
+  // 音：ユーザーの操作の後に鳴り始める。M でミュート、設定は再読み込みしても残る
+  const au = () => page.evaluate(() => ({ state: window.__yui.audio.state, muted: window.__yui.settingsStore.value.muted, sens: window.__yui.settingsStore.value.lookSensitivity }));
+  await page.mouse.click(640, 360);
+  await wait(300);
+  const a1 = await au();
+  check('[P6] 操作の後、音が鳴る状態になる（自動再生の制限に従い、操作の前は鳴らさない）', a1.state === 'running', JSON.stringify(a1));
+  await page.keyboard.press('KeyM');
+  await wait(300);
+  const a2 = await au();
+  const a2toast = await page.evaluate(() => [...document.querySelectorAll('.toast')].map((t) => t.textContent).join(' / '));
+  check('[P6] M キーで音を消せる（知らせも出る）', a2.muted && /音を消した/.test(a2toast), a2toast);
+  // 設定画面（キー操作）：視点の感度を上げる
+  await page.keyboard.press('Escape');
+  await waitMode('pause');
+  await page.click('.pause-layer .menu-item[data-id="settings"]');
+  await waitMode('settings');
+  // マウスを設定画面の外へ動かしておく（クリックした位置の行が選ばれたままにならないように）
+  await page.mouse.move(4, 4);
+  await wait(200);
+  await page.keyboard.press('ArrowRight');
+  await wait(300);
+  const a3 = await au();
+  const a3cam = await page.evaluate(() => window.__yui.cameraRig.settings.lookSensitivity);
+  check('[P6] 設定画面で視点の感度をキーで変えられ、すぐにカメラに反映される', Math.abs(a3.sens - 1.1) < 1e-6 && a3cam > 0.005, JSON.stringify({ a3, a3cam }));
+  await page.keyboard.press('Escape');
+  await waitMode('pause');
+  await page.keyboard.press('Escape');
+  await waitMode('explore');
+  await page.evaluate(() => window.__yui.saveGame());
+  await page.reload({ waitUntil: 'networkidle0' });
+  await wait(2000);
+  const a4 = await page.evaluate(() => ({ muted: window.__yui.settingsStore.value.muted, sens: window.__yui.settingsStore.value.lookSensitivity, mode: window.__yui.mode }));
+  check('[P6] 設定（ミュート・視点の感度）は再読み込みしても残る', a4.muted && Math.abs(a4.sens - 1.1) < 1e-6 && a4.mode === 'title', JSON.stringify(a4));
+  await page.evaluate(() => window.__yui.settingsStore.update({ muted: false, lookSensitivity: 1 }));
+  await startFromTitle('continue');
+
+  // 室内の壁際：カメラは壁と天井の内側に収まり、主人公は消えずに見える
+  await enterSaeHouse();
+  await place(-7.2, -4.6, Math.PI * 0.75);
+  await page.evaluate(() => { const o = window.__yui.cameraRig.orbit; o.yaw = o.targetYaw = -Math.PI * 0.25; });
+  await wait(2500);
+  const c1 = await page.evaluate(() => {
+    const g = window.__yui;
+    const c = g.camera.position;
+    const p = g.scene.getObjectByName('player');
+    let opacity = 1;
+    p.traverse((o) => { if (o.isMesh) opacity = o.material.opacity; });
+    return { visible: p.visible, opacity, cam: [c.x, c.y, c.z], dist: g.cameraRig.currentDistance, floor: g.player.y };
+  });
+  check('[P6] 室内の壁際でも、主人公は消えずに見え、カメラは室内に収まる',
+    c1.visible && c1.opacity >= 0.3 && Math.abs(c1.cam[0]) < 8.1 && c1.cam[2] > -5.7 && c1.cam[2] < 5.7 && c1.cam[1] < c1.floor + 3.4, JSON.stringify(c1));
+  await page.screenshot({ path: `${OUT}/shot-64-p6-indoor-wall.png` });
+  await leaveSaeHouse();
+
+  // 作業台：承諾を得た案が二つ以上あれば、要点を表で見比べられる（正解の印はない）
+  await page.evaluate(() => localStorage.clear());
+  await page.reload({ waitUntil: 'networkidle0' });
+  await wait(2000);
+  await startFromTitle('new');
+  await page.evaluate(() => {
+    const g = window.__yui;
+    const s = g.story;
+    const learn = [
+      ['sae.schedule', 'needsHelp'], ['sae.dateReason', 'burden'], ['sae.roof', 'worn'], ['sae.kaya', 'short'],
+      ['isuke.field', 'progress'], ['isuke.availability', 'dayBefore'], ['isuke.pastHelp', 'isukeView'],
+      ['sohei.schedule', 'kayaCutting'], ['mine.kaya', 'whyRecord'], ['mine.cutting', 'canLead'], ['ledger.basics', 'read'],
+    ];
+    for (const [t, st] of learn) s.learn(t, st);
+    for (const plan of [
+      { date: 'keep', isuke: 'none', offer: 'none', kaya: 'own', kayaReturn: 'none', soheiCover: 'none' },
+      { date: 'afterHarvest', isuke: 'dayOf', offer: 'harvestHelp', kaya: 'mine', kayaReturn: 'nextYearRecorded', soheiCover: 'mineCovers' },
+      { date: 'keep', isuke: 'dayBefore', offer: 'harvestHelp', kaya: 'mine', kayaReturn: 'nextYearRecorded', soheiCover: 'none' },
+    ]) {
+      s.setPlanDraft(plan);
+      for (const npc of s.planInvolved()) s.consultPlan(npc);
+    }
+    g.openPlanBoard();
+  });
+  await waitMode('plan');
+  for (const [w, h] of [[1280, 720], [1024, 640]]) {
+    await page.setViewport({ width: w, height: h });
+    await wait(600);
+    const pc = await page.evaluate(() => ({
+      glance: [...document.querySelectorAll('.plan-glance dt')].map((d) => d.textContent),
+      cols: document.querySelectorAll('.plan-compare-table tr:first-child th').length - 1,
+      rows: document.querySelectorAll('.plan-compare-table tr').length - 1,
+      responses: document.querySelectorAll('.plan-response').length,
+      text: document.querySelector('.plan-body')?.textContent ?? '',
+    }));
+    const pl = await layout('.plan', '.plan-compare-table td', '.plan-body');
+    check(`[P6] ${w}x${h} 作業台：要点（いつ・どこまで・加わる人・負担・約束）と、承諾を得た3つの案の見比べ表が出て、画面に収まる`,
+      JSON.stringify(pc.glance) === JSON.stringify(['いつ', '屋根をどこまで', '加わる人', '負担が重くなる人', '残る約束・返し']) &&
+      pc.cols === 3 && pc.rows === 5 && pc.responses > 0 && !/おすすめ|正解/.test(pc.text) && fits(pl, 16), JSON.stringify({ ...pc, text: undefined, pl }));
+    await page.screenshot({ path: `${OUT}/shot-65-p6-compare-${w}.png` });
+  }
+  await page.setViewport({ width: 1280, height: 720 });
+  await wait(400);
+  await page.keyboard.press('Escape');
+  await waitMode('explore');
+
+  // 屋根葺きの日：作業が進み、近くを通ると住民がひと言いう。作業の音は作業の場の近くで鳴る
+  await page.evaluate(() => localStorage.clear());
+  await page.reload({ waitUntil: 'networkidle0' });
+  await wait(2000);
+  await startFromTitle('new');
+  await page.mouse.click(640, 360);
+  await decideRoofState({ date: 'keep', isuke: 'dayBefore', offer: 'harvestHelp', kaya: 'mine', kayaReturn: 'nextYearRecorded', soheiCover: 'none' });
+  await closeNoticeOk();
+  const r1 = await page.evaluate(() => window.__yui.roofDayElapsed);
+  await place(-4.6, 12.6, Math.PI);
+  let bubble = null;
+  for (let i = 0; i < 40 && !bubble; i++) {
+    await wait(200);
+    bubble = await page.evaluate(() => { const b = document.querySelector('.speech-bubble'); return b && !b.hidden ? b.textContent : null; });
+  }
+  check('[P6] 屋根葺きの日、住民の近くを通ると頭上にひと言が出る（会話ウィンドウは開かない）', !!bubble && (await gameMode()) === 'explore', String(bubble));
+  await page.evaluate(() => { const o = window.__yui.cameraRig.orbit; o.yaw = o.targetYaw = Math.PI; });
+  await wait(800);
+  await page.screenshot({ path: `${OUT}/shot-66-p6-roofday-bark.png` });
+  const r2 = await page.evaluate(() => ({ elapsed: window.__yui.roofDayElapsed, work: window.__yui.audio.work }));
+  check('[P6] 屋根葺きの日は時間とともに作業が進み、作業の場の近くでは作業の音が鳴る', r2.elapsed > r1 && r2.work.volume > 0.3 && r2.work.interval < 1.5, JSON.stringify({ r1, r2 }));
+  const r3 = await page.evaluate(() => { const g = window.__yui; g.player.x = 0; g.player.z = 38; return true; });
+  await wait(600);
+  const r4 = await page.evaluate(() => window.__yui.audio.work.volume);
+  check('[P6] 作業の場から離れると作業の音は小さくなる', r3 && r4 < r2.work.volume, String(r4));
 }
 
 // 描画負荷（ソフトウェア描画のため FPS は参考にならない。描画呼び出し数で確認する）

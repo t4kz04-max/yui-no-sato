@@ -46,6 +46,9 @@ await page.goto(url, { waitUntil: 'load' });
 await page.evaluate(() => localStorage.clear());
 await page.reload({ waitUntil: 'load' });
 await wait(2000);
+// Phase 6：タイトル画面を閉じて村に出る（撮影は同じ視点で行い、Phase 5.5 の計測と比べられるようにする）
+const leaveTitle = () => page.evaluate(() => { const g = window.__yui; if (g.mode === 'title') g.dispatch('close'); });
+await leaveTitle();
 
 const renderer = await page.evaluate(() => {
   const c = document.querySelector('#canvas-root canvas');
@@ -135,6 +138,7 @@ async function resetGame() {
   });
   await page.reload({ waitUntil: 'load' });
   await wait(1500);
+  await leaveTitle();
 }
 
 async function closeNotice() {

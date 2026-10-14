@@ -1,5 +1,5 @@
 import type { CharacterDef } from '../content/characters';
-import type { ForecastLine, OutcomeDef, OutcomeLine } from '../content/plan';
+import type { ForecastLine, GlanceLine, OutcomeDef, OutcomeLine } from '../content/plan';
 import { evaluate } from '../story/conditions';
 import type { StoryState } from '../story/StoryState';
 import { CONSENT_LABEL, type ConsentStatus, type PlanId, type PlanPhase, type PlanSpec, type TopicId } from '../story/types';
@@ -53,6 +53,8 @@ export interface AgreedPlanView {
   readonly label: string;
   readonly current: boolean;
   readonly forecast: readonly ForecastLine[];
+  /** 要点（見比べ用。Phase 6）。 */
+  readonly glance: readonly GlanceLine[];
 }
 
 export interface ConsiderationView {
@@ -68,6 +70,8 @@ export interface PlanBoardModel {
   readonly outcomeTitle?: string;
   readonly items: readonly PlanItemView[];
   readonly invalidReason: string | null;
+  /** 今の案の要点（いつ・どこまで・加わる人・負担・約束）。 */
+  readonly glance: readonly GlanceLine[];
   readonly forecast: readonly ForecastLine[];
   readonly responses: readonly PlanResponseView[];
   readonly agreed: readonly AgreedPlanView[];
@@ -87,6 +91,7 @@ export const RESPONSE_LABEL: Record<ResponseState, string> = {
 export interface PlanUiDefs {
   readonly summaries: Readonly<Record<string, string>>;
   readonly forecast: (plan: PlanSpec, story: StoryState) => ForecastLine[];
+  readonly glance: (plan: PlanSpec, story: StoryState) => GlanceLine[];
   readonly relevantTopics: Readonly<Record<string, Readonly<Record<string, readonly TopicId[]>>>>;
   /** 結果の見出し・一行の要約（作業台の「決めた」表示や「選ばなかった案」に使う）。 */
   readonly outcomeTitle: (id: string) => string | undefined;
@@ -149,6 +154,7 @@ export function buildPlanBoard(story: StoryState, src: PlanSources): PlanBoardMo
     label: describePlan(story, plan),
     current: sigOf(plan) === current,
     forecast: ui.forecast(plan, story),
+    glance: ui.glance(plan, story),
   }));
 
   const past = story
@@ -181,6 +187,7 @@ export function buildPlanBoard(story: StoryState, src: PlanSources): PlanBoardMo
     ...(outcomeTitle ? { outcomeTitle } : {}),
     items,
     invalidReason: draft ? planning.invalidReason(draft) : null,
+    glance: draft ? ui.glance(draft, story) : [],
     forecast: draft ? ui.forecast(draft, story) : [],
     responses,
     agreed,
@@ -237,4 +244,20 @@ export function buildOutcome(
     costs: shownLines(story, def.costs),
     notChosen,
   };
+}
+
+// ───────── 新しく考えられるようになった案（重要な発見の意味を伝える。Phase 6） ─────────
+
+/**
+ * 今の章の作業台で、情報を知ったことで選べるようになった選択肢の一覧（`項目:選択肢`）。
+ * 発見の前後で比べ、増えたら「作業台で考えられる案が増えた」と伝える（どの案かは作業台で確かめる）。
+ */
+export function unlockedOptions(story: StoryState): Set<string> {
+  const planning = story.planDefs();
+  const keys = new Set<string>();
+  if (!planning) return keys;
+  for (const item of planning.items) {
+    for (const o of item.options) if (o.when && !o.hidden && evaluate(o.when, story)) keys.add(`${planning.id}:${item.id}:${o.id}`);
+  }
+  return keys;
 }

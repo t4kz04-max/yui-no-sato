@@ -24,6 +24,7 @@ export interface DialogueBoxHandlers {
   onHover(index: number): void;
 }
 
+/** 文字送りの速さの既定（1 秒あたりの文字数）。設定画面で変えられる（Phase 6）。 */
 const CHARS_PER_SECOND = 45;
 /**
  * 選択肢が出てからキーで選べるまでの猶予（秒）。文字送りを飛ばすつもりで押した決定キーが、
@@ -43,6 +44,8 @@ export class DialogueBox {
   private plainLength = 0;
   private renderedChoicesKey = '';
   private choicesVisibleTime = 0;
+  /** 文字送りの速さ（Infinity で一度に全文）。 */
+  charsPerSecond = CHARS_PER_SECOND;
 
   constructor(parent: HTMLElement, private readonly handlers: DialogueBoxHandlers) {
     this.layer = el('div', 'dialogue-layer');
@@ -120,7 +123,7 @@ export class DialogueBox {
   update(dt: number): void {
     if (!this.choicesEl.hidden) this.choicesVisibleTime += dt;
     if (!this.model || !this.isRevealing) return;
-    this.shown = Math.min(this.plainLength, this.shown + dt * CHARS_PER_SECOND);
+    this.shown = Number.isFinite(this.charsPerSecond) ? Math.min(this.plainLength, this.shown + dt * this.charsPerSecond) : this.plainLength;
     this.renderText();
     if (!this.isRevealing) this.renderChoices();
   }

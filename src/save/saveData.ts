@@ -225,6 +225,12 @@ function parseStory(
     }
     plans = {};
   }
+  // Phase 6 より前は、計画を決めた時点で「葺き替えた」を記録していた。屋根葺きの日を終える前の記録では取り除く
+  // （今は、屋根葺きの日を終えたときに記録する）。形式は変わらないので版は上げない。
+  if (chapter === 'roofDay' && !result.flags.includes('roofDay:ended')) {
+    const early = (l: LearnedStage) => l.topic === 'sae.roof' && (l.stage === 'renewed' || l.stage === 'partial');
+    if (result.learned.some(early)) result = { ...result, learned: result.learned.filter((l) => !early(l)) };
+  }
 
   // 章と決定の整合（決めていないのに先の章にいる、などは部分的に直せないので破損として扱う）
   const roofDecided = !!plans.roof?.decision;

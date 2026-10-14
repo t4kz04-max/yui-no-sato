@@ -45,6 +45,11 @@ export interface ThatchRoof {
   surfaceY(absX: number): number;
   /** 上面の点（膨らみを含む、状態は old 以外の形）。u：軒先 0〜棟 1、v：棟方向 0〜1。 */
   surfacePoint(side: 1 | -1, u: number, v: number): THREE.Vector3;
+  /**
+   * 屋根葺きの日の作業の進み具合（Phase 6）。南面を軒先から progress（0〜1）まで新しい茅にする。
+   * full＝南面いっぱい、そうでなければ傷んだ所だけ。null で今の状態の見た目に戻す。
+   */
+  setWork(work: { readonly progress: number; readonly full: boolean } | null): void;
   /** 屋根の状態に合わせて頂点色（と傷みのへこみ）を切り替える。 */
   setState(state: RoofState): void;
   readonly state: RoofState;
@@ -244,7 +249,7 @@ export function createThatchRoof(spec: ThatchRoofSpec): ThatchRoof {
     return out.multiplyScalar(1 - 0.04 * band);
   };
 
-  const computeColors = (state: RoofState): Float32Array => {
+  const computeColors = (state: RoofState, work: { readonly progress: number; readonly full: boolean } | null = null): Float32Array => {
     const arr = new Float32Array(colorKeys.length * 3);
     colorKeys.forEach((k, i) => {
       if (k.under) {
@@ -271,6 +276,12 @@ export function createThatchRoof(spec: ThatchRoofSpec): ThatchRoof {
         } else {
           weathered(k.side, k.u, k.v, tmp, 1, mossBase);
           if (state === 'old' && dmg > 0) damaged(tmp, dmg * 0.95);
+          if (work && south) {
+            // 葺き進んだ所（軒先から progress まで）を新しい茅にする
+            const region = work.full ? 1 : spec.damage ? smoothstep(0.35, 0.65, dmg) : 1 - smoothstep(0.4, 0.5, k.u);
+            const front = 1 - smoothstep(work.progress - 0.03, work.progress + 0.03, k.u);
+            if (region * front > 0) tmp.lerp(fresh(k.u, k.v, new THREE.Color()), region * front);
+          }
         }
         tmp.multiplyScalar(k.shade);
       }
@@ -288,6 +299,9 @@ export function createThatchRoof(spec: ThatchRoofSpec): ThatchRoof {
   }
 
   let current: RoofState = 'old';
+  /** 作業の進み具合の見た目（空なら今の状態の見た目）。 */
+  let workKey = '';
+  const workColors = new Map<string, Float32Array>();
   const roof: ThatchRoof = {
     geometry,
     ridgeY,
@@ -312,6 +326,21 @@ export function createThatchRoof(spec: ThatchRoofSpec): ThatchRoof {
       geometry.computeVertexNormals();
       geometry.computeBoundingSphere();
       current = state;
+      workKey = '';
+    },
+    setWork(work) {
+      const key = work ? `${Math.round(work.progress * 20) / 20}:${work.full}` : '';
+      if (key === workKey) return;
+      workKey = key;
+      // 進み具合は 0.05 刻みで計算して取っておく（作業中に少しずつ進めても毎回計算しない）
+      let colors = work ? workColors.get(key) : colorsByState.get(current);
+      if (!colors) {
+        colors = work ? computeColors('old', { progress: Math.round(work.progress * 20) / 20, full: work.full }) : computeColors(current);
+        if (work) workColors.set(key, colors);
+        else colorsByState.set(current, colors);
+      }
+      (colorAttr.array as Float32Array).set(colors);
+      colorAttr.needsUpdate = true;
     },
   };
   roof.setState('old');

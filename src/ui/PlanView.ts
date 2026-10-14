@@ -1,5 +1,5 @@
-import type { ForecastLine } from '../content/plan';
-import type { PlanBoardModel } from '../journal/planModels';
+import type { ForecastLine, GlanceLine } from '../content/plan';
+import type { AgreedPlanView, PlanBoardModel } from '../journal/planModels';
 import type { PlanSpec } from '../story/types';
 import { el, overlayLayer, uiButton } from './dom';
 
@@ -23,6 +23,8 @@ export class PlanView {
   private readonly bodyEl: HTMLElement;
   private readonly decideBtn: HTMLButtonElement;
   private readonly footNote: HTMLElement;
+  /** くわしい見込みを開いているか（描き直しても保つ）。 */
+  private forecastOpen = false;
 
   constructor(parent: HTMLElement, private readonly handlers: PlanViewHandlers) {
     this.layer = overlayLayer('plan-layer');
@@ -89,11 +91,20 @@ export class PlanView {
     if (m.invalidReason) proposal.append(el('div', 'plan-warning', m.invalidReason));
     left.append(proposal);
 
-    // ── 右：見込み（判断の中心なので最初に見える位置に） ──
+    // ── 右：要点（判断の中心なので最初に見える位置に。Phase 6） ──
+    if (m.glance.length > 0) {
+      const gl = section('この案の要点');
+      gl.classList.add('plan-glance');
+      gl.append(glanceList(m.glance));
+      if (m.glance.some((g) => g.uncertain)) gl.append(el('p', 'plan-muted', '「分からない」所は、村で話を聞き、調べると見通せる。'));
+      right.append(gl);
+    }
+    // ── 右：見込み（文章でくわしく。開閉式で、開いたかどうかは描き直しても保つ） ──
     if (m.forecast.length > 0) {
-      const fc = section('この案で起きること（見込み）');
-      fc.classList.add('plan-forecast');
-      fc.append(forecastList(m.forecast));
+      const fc = el('details', 'plan-section plan-forecast');
+      fc.open = this.forecastOpen;
+      fc.addEventListener('toggle', () => (this.forecastOpen = fc.open));
+      fc.append(el('summary', 'plan-section-title', 'この案で起きること（くわしい見込み）'), forecastList(m.forecast));
       right.append(fc);
     }
 
@@ -114,10 +125,16 @@ export class PlanView {
     }
 
     // ── 右：承諾を得た案（見比べて選ぶ） ──
-    if (!m.decided && m.agreed.length > 0) {
+    if (!m.decided && m.agreed.length > 1) {
+      // 二つ以上あれば、要点を表で見比べる（どれかを正解として強調しない）
+      const ag = section(`承諾を得た案を見比べる（${m.agreed.length}）`);
+      ag.classList.add('plan-agreed', 'plan-compare');
+      ag.append(el('p', 'plan-muted', 'どれも関係する人が承知している。何を大切にするかで選ぶ。'));
+      ag.append(compareTable(m.agreed, (plan) => this.handlers.onPick(plan)));
+      right.append(ag);
+    } else if (!m.decided && m.agreed.length > 0) {
       const ag = section(`承諾を得た案（${m.agreed.length}）`);
       ag.classList.add('plan-agreed');
-      if (m.agreed.length > 1) ag.append(el('p', 'plan-muted', 'どれも関係する人が承知している。何を大切にするかで選ぶ。'));
       for (const a of m.agreed) {
         const card = el('details', `plan-agreed-card${a.current ? ' is-current' : ''}`);
         card.dataset.key = a.key;
@@ -175,4 +192,43 @@ function forecastList(lines: readonly ForecastLine[]): HTMLElement {
     dl.append(el('dt', undefined, f.aspect), el('dd', f.uncertain ? 'is-uncertain' : undefined, f.text));
   }
   return dl;
+}
+
+function glanceList(lines: readonly GlanceLine[]): HTMLElement {
+  const dl = el('dl', 'forecast glance');
+  for (const g of lines) {
+    const dd = el('dd', g.uncertain ? 'is-uncertain' : undefined, g.text);
+    dd.dataset.key = g.key;
+    dl.append(el('dt', undefined, g.label), dd);
+  }
+  return dl;
+}
+
+/** 承諾を得た案の要点を、列に並べて見比べる表（横に長いときは表の中だけ横にスクロールする）。 */
+function compareTable(agreed: readonly AgreedPlanView[], onPick: (plan: AgreedPlanView['plan']) => void): HTMLElement {
+  const wrap = el('div', 'plan-compare-wrap');
+  const table = el('table', 'plan-compare-table');
+  const head = el('tr');
+  head.append(el('th', 'plan-compare-corner', ''));
+  agreed.forEach((a, i) => {
+    const th = el('th', a.current ? 'is-current' : undefined);
+    th.dataset.key = a.key;
+    th.append(el('div', 'plan-compare-name', `案 ${String.fromCharCode(65 + i)}`), el('div', 'plan-compare-label', a.label));
+    if (a.current) th.append(el('span', 'plan-current-chip', '広げている案'));
+    else th.append(uiButton('plan-pick', 'この案を広げる', () => onPick(a.plan)));
+    head.append(th);
+  });
+  table.append(head);
+  const keys = agreed[0]?.glance.map((g) => g.key) ?? [];
+  for (const key of keys) {
+    const tr = el('tr');
+    tr.append(el('th', 'plan-compare-aspect', agreed[0]!.glance.find((g) => g.key === key)!.label));
+    for (const a of agreed) {
+      const g = a.glance.find((x) => x.key === key);
+      tr.append(el('td', `${a.current ? 'is-current' : ''}${g?.uncertain ? ' is-uncertain' : ''}`.trim() || undefined, g?.text ?? '—'));
+    }
+    table.append(tr);
+  }
+  wrap.append(table);
+  return wrap;
 }

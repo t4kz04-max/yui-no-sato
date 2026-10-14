@@ -230,7 +230,8 @@ function outcomeEffects(id: string): Effect[] {
       content: '来年の秋、借りた茅と同じ束数を茅で返す（結帳に記した）',
     });
   }
-  effects.push(learn('sae.roof', o.full ? 'renewed' : 'partial'), setFlag('roofing:decided'), setChapter('roofDay'));
+  // 葺き替えた（renewed／partial）という記録は、屋根葺きの日を終えたときに付ける（content/dialogues.ts の dayEnd。Phase 6）
+  effects.push(setFlag('roofing:decided'), setChapter('roofDay'));
   return effects;
 }
 
@@ -402,6 +403,96 @@ export function forecastPlan(plan: PlanSpec, q: StoryQuery): ForecastLine[] {
   if (knowsPast) owe.push('十二年前の伊助家への返しも残っている');
   lines.push(line('残る約束・負担', owe.length > 0 ? owe.join('。') : '新しい約束は増えない'));
   return lines;
+}
+
+// ───────── 要点（作業台で案を見比べるための短い項目。Phase 6） ─────────
+
+export type GlanceKey = 'when' | 'scope' | 'who' | 'burden' | 'promises';
+
+export interface GlanceLine {
+  readonly key: GlanceKey;
+  readonly label: string;
+  readonly text: string;
+  /** 情報が足りず、見通せない部分がある（見込みと同じ基準）。 */
+  readonly uncertain: boolean;
+}
+
+export const GLANCE_LABEL: Record<GlanceKey, string> = {
+  when: 'いつ',
+  scope: '屋根をどこまで',
+  who: '加わる人',
+  burden: '負担が重くなる人',
+  promises: '残る約束・返し',
+};
+
+/**
+ * 案の要点。見込み（forecastPlan）と同じく、案の内容と**知っている情報の分だけ**から決まる。
+ * 良し悪しの印は付けない（何を大切にするかはプレイヤーが決める）。
+ */
+export function glancePlan(plan: PlanSpec, q: StoryQuery): GlanceLine[] {
+  if (PLAN_ROOF.invalidReason(plan) !== null) return [];
+  const { date, isuke, offer, kaya, kayaReturn, soheiCover } = plan;
+  const helps = offer === 'harvestHelp';
+  const delayed = date === 'afterHarvest';
+  const covered = soheiCover === 'mineCovers';
+  const k = (c: Condition) => evaluate(c, q);
+  const knowsRoof = k(any(knows('sae.roof'), knows('sae.dateReason', 'roofWorry')));
+  const knowsHarvest = k(knows('isuke.availability', 'harvest'));
+  const knowsProgress = k(knows('isuke.field', 'progress'));
+  const knowsKaya = k(knows('sae.kaya'));
+  const knowsSoheiConflict = k(knows('sohei.schedule', 'kayaCutting'));
+  const g = (key: GlanceKey, text: string, uncertain = false): GlanceLine => ({ key, label: GLANCE_LABEL[key], text, uncertain });
+
+  const when = !delayed
+    ? isuke === 'none'
+      ? ['予定日（人手が少なく二日がかり）', false]
+      : ['予定日（一日）', false]
+    : knowsProgress
+      ? [`刈り入れの後（${helps ? '七日ほど先' : '十日ほど先'}）`, false]
+      : ['刈り入れの後（いつになるかは分からない）', true];
+  const scope =
+    kaya === 'mine' ? ['南面をすべて', false] : knowsKaya ? ['傷みのひどい所だけ（残りは持ち越し）', false] : ['手持ちの茅で葺ける分（どこまでかは分からない）', true];
+
+  const who: string[] = ['サエ家', '村の人'];
+  let whoUncertain = false;
+  if (!delayed || covered) who.push('宗平');
+  else if (knowsSoheiConflict) who.push('宗平は来られない');
+  else {
+    who.push('宗平（来られるか分からない）');
+    whoUncertain = true;
+  }
+  if (isuke === 'dayBefore') who.push('伊助（前日の準備）');
+  else if (isuke === 'dayOf' && delayed) who.push('伊助');
+  else if (isuke === 'dayOf') {
+    if (knowsHarvest) who.push('伊助は来られない（刈り入れと重なる）');
+    else {
+      who.push('伊助（来られるか分からない）');
+      whoUncertain = true;
+    }
+  }
+  if (covered) who.push('ミネ（茅刈りを仕切る）');
+
+  const burden: string[] = [];
+  if (!delayed && isuke === 'none') burden.push('サエ家（人手が少なく二日がかり）');
+  if (isuke === 'dayBefore') burden.push('伊助（刈り入れが半日止まる）');
+  if (helps) burden.push(delayed ? 'サエ家（自分の屋根を後回しにして田に人を出す）' : 'サエ家（伊助家の刈り入れに人を出す）');
+  if (delayed) burden.push(knowsRoof ? 'サエ家（待つあいだに屋根の傷みが進む）' : 'サエ家（待つあいだ屋根がどうなるかは分からない）');
+  if (covered) burden.push('ミネ（茅刈りを仕切る大きな仕事）');
+  const burdenUncertain = delayed && !knowsRoof;
+
+  const promises: string[] = [];
+  if (kaya === 'mine') promises.push(kayaReturn === 'nextYearRecorded' ? 'ミネ家に来年の秋、茅で返す（結帳に記す）' : 'ミネ家への返し方（ミネの条件に合うかが鍵）');
+  if (isuke === 'dayBefore' && helps) promises.push('屋根葺きのすぐ後に、伊助家の刈り入れに人を出す');
+  else if (isuke !== 'none') promises.push('伊助への返しが増える');
+  if (covered) promises.push('宗平はミネに借りができる');
+
+  return [
+    g('when', when[0] as string, when[1] as boolean),
+    g('scope', scope[0] as string, scope[1] as boolean),
+    g('who', who.join('・'), whoUncertain),
+    g('burden', burden.length > 0 ? burden.join('／') : '特に重くなる人はいない', burdenUncertain),
+    g('promises', promises.length > 0 ? promises.join('／') : '新しい約束は増えない', kaya === 'mine' && kayaReturn !== 'nextYearRecorded'),
+  ];
 }
 
 // ───────── 結果 ─────────

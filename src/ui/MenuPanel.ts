@@ -18,6 +18,8 @@ export interface MenuContent {
   readonly status?: string;
   /** 最初に選ばれている項目（安全な方を既定にする）。 */
   readonly defaultId?: string;
+  /** 背後の村を見せない（例：段取りを決めた直後。まだ作業の日を迎えていない）。 */
+  readonly solid?: boolean;
 }
 
 export class MenuPanel {
@@ -33,6 +35,8 @@ export class MenuPanel {
     parent: HTMLElement,
     className: string,
     private readonly onActivate: (id: string) => void,
+    /** 選んでいる項目が変わったとき（操作音）。 */
+    private readonly onMove: () => void = () => undefined,
   ) {
     this.layer = overlayLayer(`menu-layer ${className}`);
     const panel = el('div', 'menu-panel');
@@ -54,6 +58,7 @@ export class MenuPanel {
     this.content = content;
     const def = content.items.findIndex((i) => i.id === content.defaultId && !i.disabled);
     this.selected = def >= 0 ? def : Math.max(0, content.items.findIndex((i) => !i.disabled));
+    this.layer.classList.toggle('is-solid', content.solid ?? false);
     this.titleEl.textContent = content.title;
     this.bodyEl.textContent = content.body ?? '';
     this.bodyEl.hidden = !content.body;
@@ -64,7 +69,8 @@ export class MenuPanel {
         b.dataset.id = item.id;
         b.disabled = item.disabled ?? false;
         b.addEventListener('pointerenter', () => {
-          if (!item.disabled) {
+          if (!item.disabled && this.selected !== i) {
+            this.onMove();
             this.selected = i;
             this.renderSelection();
           }
@@ -94,6 +100,7 @@ export class MenuPanel {
       i = (i + delta + items.length) % items.length;
       if (!items[i]!.disabled) break;
     }
+    if (i !== this.selected) this.onMove();
     this.selected = i;
     this.renderSelection();
   }

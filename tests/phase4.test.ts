@@ -13,9 +13,10 @@ import {
   RELEVANT_TOPICS,
   RESPONSE_SUMMARY,
   forecastPlan,
+  glancePlan,
 } from '../src/content/plan';
 import { roofDayColliders, roofDayStage, staticCrew } from '../src/content/staging';
-import { ENDINGS, INITIAL_PLAN3, RELEVANT_TOPICS3, RESPONSE_SUMMARY3, forecastPlan3 } from '../src/content/plan3';
+import { ENDINGS, INITIAL_PLAN3, RELEVANT_TOPICS3, RESPONSE_SUMMARY3, forecastPlan3, glancePlan3 } from '../src/content/plan3';
 import { HOUSEHOLDS, STORY_DEFS } from '../src/content/story';
 import { currentObjective } from '../src/content/objectives';
 import { parseEmphasis, plainText } from '../src/dialogue/markup';
@@ -42,6 +43,7 @@ const src: PlanSources = {
     roof: {
       summaries: RESPONSE_SUMMARY,
       forecast: forecastPlan,
+      glance: glancePlan,
       relevantTopics: RELEVANT_TOPICS,
       outcomeTitle: (id) => OUTCOMES[id]?.title,
       outcomeTagline: (id) => OUTCOMES[id]?.tagline,
@@ -49,6 +51,7 @@ const src: PlanSources = {
     isukeRoof: {
       summaries: RESPONSE_SUMMARY3,
       forecast: forecastPlan3,
+      glance: glancePlan3,
       relevantTopics: RELEVANT_TOPICS3,
       outcomeTitle: (id) => ENDINGS[id]?.title,
       outcomeTagline: (id) => ENDINGS[id]?.title,
@@ -138,6 +141,9 @@ const PLANS: Record<string, PlanSpec> = {
 
 /** Game と同じ章の進め方：屋根葺きの日を終える → 三年後。 */
 function toChapter3(story: StoryState) {
+  // サエと話して「一日を終える」を選んだときの効果（葺き替えの記録＋フラグ。content/dialogues.ts の dayEnd）
+  const outcome = story.planDecision('roof')?.outcome ?? '';
+  story.learn('sae.roof', outcome.endsWith('-full') ? 'renewed' : 'partial');
   story.set('roofDay:ended');
   for (const id of PROMISES_KEPT_BY_CH3) if (story.allPromises().some((p) => p.id === id)) story.set(`kept:${id}`);
   story.setChapter('ch3');
@@ -308,7 +314,8 @@ describe('第1幕の結果', () => {
     expect(consultAndDecide(s, PLANS[id]!)).toBe(id);
     expect(s.chapter).toBe('roofDay');
     const full = id.endsWith('-full');
-    expect(s.currentStage('sae.roof')).toBe(full ? 'renewed' : 'partial');
+    // 決めた時点ではまだ葺いていない（葺き替えの記録は、屋根葺きの日を終えたときに付く。Phase 6）
+    expect(['renewed', 'partial']).not.toContain(s.currentStage('sae.roof'));
     expect(s.allPromises().some((p) => p.id === 'saeReturnsKaya')).toBe(full);
     expect(s.allPromises().some((p) => p.id === 'saeHelpsIsukeHarvest')).toBe(id.startsWith('prep'));
     expect(s.consentStatus('mine', 'coverSohei') === 'agreed').toBe(id.startsWith('wait'));
@@ -356,8 +363,18 @@ describe('屋根葺き当日 → 第3幕 → エンディング', () => {
     expect(currentObjective(story)).toContain('屋根葺きの日');
     expect(talk(sys, 'sohei').join()).toContain('ミネが茅刈りを仕切ってくれた');
     expect(talk(sys, 'mine').join()).toContain('茅場');
+    expect(story.currentStage('sae.roof')).toBe('worse');
     talk(sys, 'sae', say('一日を終える'));
     expect(story.has('roofDay:ended')).toBe(true);
+    // 一日を終えたときに、はじめて「葺き替えた」と記録される（Phase 6）
+    expect(story.currentStage('sae.roof')).toBe('renewed');
+  });
+
+  it('屋根葺き当日：手持ちの茅の計画では、一日を終えると「傷みのひどい所だけ葺き替えた」と記録される', () => {
+    const { story, sys } = toCh3('prep-part');
+    expect(['renewed', 'partial']).not.toContain(story.currentStage('sae.roof'));
+    talk(sys, 'sae', say('一日を終える'));
+    expect(story.currentStage('sae.roof')).toBe('partial');
   });
 
   it('第3幕：記録どおり「屋根の上」を頼んでもサエは断り（強制できない）、足のことを知って役割を相談し直すと E1', () => {

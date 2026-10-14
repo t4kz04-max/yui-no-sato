@@ -1,6 +1,6 @@
 import { evaluate, knows, setChapter, setConsent, setFlag, type Condition, type Effect, type StoryQuery } from '../story/conditions';
 import type { NpcId, PlanItemDef, PlanningDefs, PlanRule, PlanSpec } from '../story/types';
-import type { ForecastLine, OutcomeLine } from './plan';
+import { GLANCE_LABEL, type ForecastLine, type GlanceKey, type GlanceLine, type OutcomeLine } from './plan';
 import { parseOutcomeId } from './plan';
 
 /**
@@ -144,6 +144,47 @@ export function forecastPlan3(plan: PlanSpec, q: StoryQuery): ForecastLine[] {
   ];
 }
 
+/** 第3幕の案の要点（作業台で見比べる。知っている情報の分だけ見通せる）。 */
+export function glancePlan3(plan: PlanSpec, q: StoryQuery): GlanceLine[] {
+  const injuredKnown = evaluate(knows('sae.later', 'injured'), q);
+  const g = (key: GlanceKey, text: string, uncertain = false): GlanceLine => ({ key, label: GLANCE_LABEL[key], text, uncertain });
+  if (plan.timing === 'nextYear') {
+    return [
+      g('when', '今年は見送り（来年に向けて相談を続ける）'),
+      g('scope', '伊助家の屋根は今年は葺かない（もう一年もつ）'),
+      g('who', '—'),
+      g('burden', '伊助家（屋根の傷みは進む）'),
+      g('promises', '十五年前の返しは「まだ」のまま'),
+    ];
+  }
+  const sae =
+    plan.saeHelp === 'roofTop'
+      ? injuredKnown
+        ? ['サエ（屋根の上。ただし足を痛めていて上がれない）', false]
+        : ['サエ（屋根の上。引き受けられるかは分からない）', true]
+      : plan.saeHelp === 'ground'
+        ? ['サエ（下で茅の受け渡しと片付け）', false]
+        : ['サエ家は加わらない', false];
+  return [
+    g('when', '今年の秋'),
+    g('scope', '伊助家の屋根を葺く'),
+    g('who', `伊助家・村の人・${sae[0] as string}`, sae[1] as boolean),
+    g(
+      'burden',
+      plan.saeHelp === 'roofTop' ? (injuredKnown ? 'サエ（痛めた足で屋根の上の仕事）' : 'サエ（屋根の上の仕事）') : '特に重くなる人はいない',
+      plan.saeHelp === 'roofTop' && !injuredKnown,
+    ),
+    g(
+      'promises',
+      plan.saeHelp === 'none'
+        ? '十五年前の返しは「まだ」のまま'
+        : plan.saeHelp === 'ground'
+          ? '本人どうしが納得すれば、十五年前の返しとして記す'
+          : '記録どおりの返しになる',
+    ),
+  ];
+}
+
 // ───────── エンディング ─────────
 
 export interface EndingDef {
@@ -151,6 +192,10 @@ export interface EndingDef {
   readonly code: string;
   readonly title: string;
   readonly story: readonly OutcomeLine[];
+  /** 振り返り（エンディング・選んだことの記録）：実現したこと。点数にはしない。 */
+  readonly achieved: readonly OutcomeLine[];
+  /** 振り返り：残ったこと・これからのこと。 */
+  readonly remains: readonly OutcomeLine[];
 }
 
 const act1 = (...families: string[]): Condition => ({
@@ -180,6 +225,16 @@ export const ENDINGS: Readonly<Record<string, EndingDef>> = {
       { text: '結帳には、返しの記録と、これからの約束が並んだ。', when: act1Part },
       { text: '結帳の十五年前の記録の横に、「返し 済」と書き加えられた。', when: act1Full },
     ],
+    achieved: [
+      { text: '伊助家の屋根を、今年の秋に葺いた' },
+      { text: 'サエ家は下の仕事を引き受け、十五年前の手伝いを返した（本人どうしで納得して結帳に記した）' },
+      { text: 'サエに、足の痛む体で屋根に上がる無理をさせなかった' },
+    ],
+    remains: [
+      { text: '返しは、十五年前と同じ屋根の上の仕事ではなかった' },
+      { text: 'サエ家の屋根の残りを葺くときは、伊助家が手を貸す約束になった', when: act1Part },
+      { text: '手伝いに来た村の人たちへの返しは、それぞれの家の屋根葺きの折に' },
+    ],
   },
   e2: {
     id: 'e2',
@@ -190,6 +245,15 @@ export const ENDINGS: Readonly<Record<string, EndingDef>> = {
       { text: 'サエさんは、その様子を少し離れたところから見ていた。「返せなかったわね」と、小さく言った。' },
       { text: '結帳の十五年前の記録は、「返しはまだ」のまま残っている。どう返すかは、これから話し合うことになる。' },
     ],
+    achieved: [
+      { text: '伊助家の屋根を、今年の秋に葺いた' },
+      { text: 'サエに無理をさせずに済んだ' },
+    ],
+    remains: [
+      { text: '十五年前の伊助家への返しは、「まだ」のまま残った' },
+      { text: 'サエ家がどう返すかは、これから話し合う' },
+      { text: '手伝いに来た村の人たちへの返しは、それぞれの家の屋根葺きの折に' },
+    ],
   },
   e3: {
     id: 'e3',
@@ -199,6 +263,14 @@ export const ENDINGS: Readonly<Record<string, EndingDef>> = {
       { text: '伊助さんは、今年の屋根葺きを見送ると決めた。屋根はもう一年もつ。' },
       { text: '誰かに無理をさせて葺くより、来年に向けて、みんなでもう一度話し合うことにした。' },
       { text: 'これは失敗ではない。結帳の記録は、次の相談のためにある。' },
+    ],
+    achieved: [
+      { text: '誰にも無理をさせずに済んだ' },
+      { text: '来年に向けて、伊助家・サエ家・村の人たちで相談を続けることになった' },
+    ],
+    remains: [
+      { text: '伊助家の屋根は今年は葺かない（もう一年もつが、傷みは進む）' },
+      { text: '十五年前の伊助家への返しは、「まだ」のまま残った' },
     ],
   },
 };

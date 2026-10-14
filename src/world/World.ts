@@ -154,6 +154,11 @@ export class World implements WalkableWorld {
     if (roof && roof.state !== state) roof.setState(state);
   }
 
+  /** 屋根葺きの日の作業の進み具合を屋根に表す（null で元に戻す。Phase 6）。 */
+  setRoofWork(buildingId: string, work: { readonly progress: number; readonly full: boolean } | null): void {
+    this.roofs.get(buildingId)?.setWork(work);
+  }
+
   roofState(buildingId: string): RoofState | undefined {
     return this.roofs.get(buildingId)?.state;
   }

@@ -9,13 +9,17 @@ export class ResultView {
   private readonly layer: HTMLDivElement;
   private readonly bodyEl: HTMLElement;
 
-  constructor(parent: HTMLElement, onClose: () => void) {
+  constructor(parent: HTMLElement, onClose: () => void, onHistory: () => void) {
     this.layer = overlayLayer('result-layer');
     const panel = el('div', 'result panel-paper');
     panel.setAttribute('role', 'dialog');
     this.bodyEl = el('div', 'result-body');
     const footer = el('div', 'paper-footer');
-    footer.append(el('div', 'plan-foot-note', '村に戻ると、住民の様子や結帳でも違いを確かめられる。'), uiButton('plan-decide', '村に戻る［Enter］', onClose));
+    footer.append(
+      el('div', 'plan-foot-note', '村に戻ると、住民の様子や結帳でも違いを確かめられる。'),
+      uiButton('plan-pick', '選んだことの記録', onHistory),
+      uiButton('plan-decide', '先へ進む［Enter］', onClose),
+    );
     panel.append(this.bodyEl, footer);
     this.layer.append(panel);
     parent.append(this.layer);
