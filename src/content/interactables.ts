@@ -107,6 +107,29 @@ export const INTERACTABLES: readonly Interactable[] = [
     range: 2.6,
     markerHeight: 1.6,
   },
+  {
+    kind: 'object',
+    id: 'ledger',
+    label: '結帳',
+    dialogue: 'ledger',
+    location: 'saeHouse',
+    // サエ家の縁先の文箱（world/layout.ts の ledgerBox）
+    position: { x: 5.8, z: 10.45 },
+    range: 2.4,
+    markerHeight: 1.4,
+    opens: 'ledger',
+  },
+  {
+    kind: 'object',
+    id: 'mineRecords',
+    label: 'ミネ家の控え',
+    dialogue: 'mineRecords',
+    location: 'mineHouse',
+    // 茅置場の脇の棚（world/layout.ts の recordShelf）
+    position: { x: -21.4, z: 8.5 },
+    range: 2.4,
+    markerHeight: 1.8,
+  },
 ];
 
 export const NPCS: readonly NpcInteractable[] = INTERACTABLES.filter((i): i is NpcInteractable => i.kind === 'npc');

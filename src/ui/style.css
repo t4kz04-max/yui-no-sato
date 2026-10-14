@@ -388,3 +388,507 @@ body {
     display: none;
   }
 }
+
+/* ───────── Phase 2：共通の画面（手帳・結帳・ポーズ・お知らせ） ───────── */
+
+.overlay-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(10, 8, 6, 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.panel-close,
+.menu-item,
+.notebook-tab {
+  font: inherit;
+  cursor: pointer;
+}
+
+.panel-close {
+  padding: 4px 12px;
+  font-size: 13px;
+  color: var(--hud-text);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 240, 220, 0.22);
+  border-radius: 6px;
+}
+
+.panel-close:hover {
+  border-color: var(--hud-accent);
+}
+
+.panel-close.is-ink {
+  color: #3b2c1e;
+  background: rgba(59, 44, 30, 0.06);
+  border-color: rgba(59, 44, 30, 0.35);
+}
+
+.badge-new {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 16px;
+  font-weight: 700;
+  color: #2b2118;
+  background: #e8a35a;
+  border-radius: 4px;
+  vertical-align: 1px;
+}
+
+/* 画面を開いている間は探索用の表示を隠す */
+#hud.is-overlay .hud-help,
+#hud.is-overlay .interaction-prompt,
+#hud.is-overlay .hud-area,
+#hud.is-overlay .hud-notebook-badge {
+  display: none;
+}
+
+.hud-notebook-badge {
+  position: absolute;
+  top: 92px;
+  right: 16px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: #2b2118;
+  background: #e8a35a;
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* ───────── 手帳 ───────── */
+
+.notebook {
+  width: min(760px, 100%);
+  height: min(620px, 100%);
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(rgba(38, 32, 26, 0.97), rgba(28, 24, 20, 0.97));
+  border: 1px solid rgba(255, 240, 220, 0.18);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.notebook-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 18px 8px;
+}
+
+.notebook-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  color: var(--hud-accent);
+}
+
+.notebook-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 14px;
+  border-bottom: 1px solid rgba(255, 240, 220, 0.14);
+  overflow-x: auto;
+}
+
+.notebook-tab {
+  padding: 8px 14px;
+  font-size: 14px;
+  color: rgba(241, 233, 220, 0.7);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+
+.notebook-tab.is-active {
+  color: var(--hud-text);
+  border-bottom-color: var(--hud-accent);
+}
+
+.notebook-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 18px 20px;
+  user-select: text;
+}
+
+.notebook-hint,
+.notebook-empty,
+.notebook-muted {
+  color: rgba(241, 233, 220, 0.6);
+  font-size: 13px;
+}
+
+.notebook-empty {
+  margin-top: 24px;
+  text-align: center;
+}
+
+.notebook-item {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border-left: 3px solid var(--hud-accent);
+}
+
+.notebook-item.is-unconfirmed {
+  border-left-color: #8fa3b8;
+  border-left-style: dashed;
+}
+
+.notebook-item-title {
+  font-size: 13px;
+  color: var(--hud-accent);
+}
+
+.notebook-item.is-unconfirmed .notebook-item-title {
+  color: #a9bccf;
+}
+
+.notebook-item-text {
+  margin-top: 3px;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.notebook-item-source {
+  margin-left: 4px;
+  font-size: 12px;
+  color: rgba(241, 233, 220, 0.5);
+}
+
+.notebook-history {
+  margin-top: 6px;
+  font-size: 13px;
+  color: rgba(241, 233, 220, 0.7);
+}
+
+.notebook-history summary {
+  cursor: pointer;
+  color: rgba(241, 233, 220, 0.55);
+}
+
+.notebook-history ol {
+  margin: 6px 0 0;
+  padding-left: 20px;
+  line-height: 1.6;
+}
+
+.notebook-history li {
+  text-decoration: line-through;
+  text-decoration-color: rgba(241, 233, 220, 0.35);
+}
+
+.notebook-person {
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(255, 240, 220, 0.12);
+  border-radius: 10px;
+}
+
+.notebook-person-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.notebook-person-name {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.notebook-person-role {
+  font-size: 12px;
+  color: rgba(241, 233, 220, 0.6);
+}
+
+.notebook-subhead {
+  margin: 6px 0 4px;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: rgba(241, 233, 220, 0.55);
+}
+
+.notebook-stance-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.stance-chip {
+  padding: 0 8px;
+  font-size: 12px;
+  line-height: 20px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.stance-chip.is-declined {
+  background: rgba(176, 82, 64, 0.45);
+}
+
+.stance-chip.is-conditional {
+  background: rgba(196, 150, 70, 0.45);
+}
+
+.stance-chip.is-agreed {
+  background: rgba(96, 142, 88, 0.5);
+}
+
+/* ───────── 結帳（古い帳面） ───────── */
+
+.ledger {
+  width: min(820px, 100%);
+  height: min(640px, 100%);
+  display: flex;
+  flex-direction: column;
+  color: #3b2c1e;
+  background: linear-gradient(90deg, rgba(120, 90, 50, 0.08), transparent 6%, transparent 94%, rgba(120, 90, 50, 0.08)),
+    #efe4cc;
+  border: 1px solid #b59a6e;
+  border-radius: 6px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55), inset 0 0 40px rgba(120, 90, 50, 0.18);
+  overflow: hidden;
+  font-family: 'Hiragino Mincho ProN', 'Yu Mincho', 'YuMincho', serif;
+}
+
+.ledger-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 20px 10px;
+  border-bottom: 2px solid #8a6d45;
+}
+
+.ledger-title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.35em;
+}
+
+.ledger-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.ledger-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 22px 16px;
+  user-select: text;
+}
+
+.ledger-entry {
+  padding: 12px 0 14px;
+  border-bottom: 1px dashed #b59a6e;
+}
+
+.ledger-entry-head {
+  display: flex;
+  gap: 14px;
+  align-items: baseline;
+  margin-bottom: 8px;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.ledger-when {
+  font-size: 13px;
+  font-weight: 400;
+  color: #6d5539;
+}
+
+.ledger-item {
+  padding: 6px 0 6px 12px;
+  border-left: 2px solid rgba(59, 44, 30, 0.25);
+  margin-bottom: 6px;
+}
+
+.ledger-item-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 15px;
+}
+
+.ledger-who {
+  font-weight: 700;
+}
+
+.ledger-kind {
+  padding: 0 6px;
+  font-size: 12px;
+  border: 1px solid rgba(59, 44, 30, 0.45);
+  border-radius: 3px;
+}
+
+.ledger-settle {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-top: 3px;
+  font-size: 13px;
+  color: #5a4630;
+}
+
+.ledger-settle-chip {
+  flex: none;
+  padding: 0 6px;
+  font-size: 12px;
+  border-radius: 3px;
+  color: #efe4cc;
+  background: #6d5539;
+}
+
+.ledger-settle.is-open .ledger-settle-chip {
+  background: #9b3d2a;
+}
+
+/* 帳面の外の情報（現在のこと）は付箋のような別の見た目にする */
+.ledger-now {
+  margin-top: 6px;
+  padding: 6px 10px;
+  font-family: 'Hiragino Sans', 'Yu Gothic UI', 'Meiryo', system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #23384a;
+  background: #dfe9ef;
+  border-left: 3px solid #4f7590;
+  border-radius: 3px;
+}
+
+.ledger-now-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #4f7590;
+}
+
+.ledger-empty {
+  font-size: 14px;
+  color: #6d5539;
+}
+
+.ledger-note {
+  padding: 8px 20px 10px;
+  font-family: 'Hiragino Sans', 'Yu Gothic UI', 'Meiryo', system-ui, sans-serif;
+  font-size: 11px;
+  color: #6d5539;
+  border-top: 1px solid #c9b48c;
+}
+
+/* ───────── ポーズ・お知らせ ───────── */
+
+.menu-panel {
+  width: min(440px, 100%);
+  padding: 20px 22px 16px;
+  background: linear-gradient(rgba(38, 32, 26, 0.97), rgba(28, 24, 20, 0.97));
+  border: 1px solid rgba(255, 240, 220, 0.18);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+}
+
+.menu-title {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--hud-accent);
+}
+
+.menu-body {
+  margin-top: 8px;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.menu-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.menu-item {
+  padding: 9px 14px;
+  font-size: 15px;
+  text-align: left;
+  color: var(--hud-text);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 240, 220, 0.14);
+  border-radius: 8px;
+}
+
+.menu-item.is-selected {
+  background: rgba(74, 58, 36, 0.95);
+  border-color: var(--hud-accent);
+}
+
+.menu-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.menu-status {
+  margin-top: 12px;
+  font-size: 12px;
+  color: rgba(241, 233, 220, 0.6);
+}
+
+.notice-layer {
+  background: rgba(10, 8, 6, 0.7);
+}
+
+/* ───────── 通知 ───────── */
+
+.toasts {
+  position: absolute;
+  top: 124px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: min(360px, calc(100% - 32px));
+}
+
+.toast {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 12px;
+  font-size: 13px;
+  background: rgba(28, 24, 20, 0.85);
+  border: 1px solid rgba(255, 240, 220, 0.16);
+  border-radius: 8px;
+  animation: toast-in 0.25s ease-out;
+  transition: opacity 0.4s ease;
+}
+
+.toast.is-leaving {
+  opacity: 0;
+}
+
+.toast-label {
+  flex: none;
+  font-size: 11px;
+  color: var(--hud-accent);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+}

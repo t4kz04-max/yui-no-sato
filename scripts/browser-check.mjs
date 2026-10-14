@@ -2,6 +2,7 @@
  * ブラウザでの動作確認。Vite 開発サーバーを起動し、ヘッドレス Chrome で確認する。
  * - Phase 0：起動・移動・衝突・カメラ・ズーム・リサイズ・コンソールエラー
  * - Phase 1（[P1]）：案内表示、会話の開始・送り・選択・終了、会話中の操作制御、調査、状態による選択肢の変化
+ * - Phase 2（[P2]）：手帳、結帳、ポーズ、会話の中断、記録（保存・続きから・壊れた記録・やり直し）
  *
  *   npm run test:browser
  *
@@ -188,7 +189,8 @@ const ui = () =>
       choices: [...document.querySelectorAll('.dialogue-choice')].map((b) => ({ text: b.textContent, selected: b.classList.contains('is-selected') })),
       active: g.interaction.isActive,
       target: g.interaction.target?.id ?? null,
-      flags: g.story.snapshot(),
+      flags: g.story.flagList(),
+      learned: g.story.allLearned().map((l) => `${l.topic}/${l.stage}`),
       inputEnabled: g.input.enabled,
       node: g.interaction.view?.nodeId ?? null,
     };
@@ -318,8 +320,162 @@ const buttons = await page.$$('.dialogue-choice');
 if (clueIndex >= 0 && buttons[clueIndex]) await buttons[clueIndex].click();
 await waitFor((u) => u.choices.length === 0);
 const u11 = await finishDialogue();
-check('[P1] クリックで選択肢を選び、知った事情が状態に残る', !u11.active && u11.flags.includes('fact:isukeHarvest'), u11.flags.join(','));
+check('[P1] クリックで選択肢を選び、知った事情が状態に残る', !u11.active && u11.learned.includes('isuke.availability/harvest'), u11.learned.join(','));
 await page.evaluate(() => { const o = window.__yui.cameraRig.orbit; o.targetYaw = Math.PI; o.targetPitch = 0.42; o.targetDistance = 10; });
+
+// ───────── Phase 2：手帳・結帳・ポーズ・中断・記録 ─────────
+const g2 = () =>
+  page.evaluate(() => {
+    const g = window.__yui;
+    const q = (s) => document.querySelector(s);
+    const vis = (s) => { const e = q(s); return !!e && !e.hidden; };
+    return {
+      mode: g.mode,
+      active: g.interaction.isActive,
+      flags: g.story.flagList(),
+      learned: g.story.allLearned().map((l) => `${l.topic}/${l.stage}`),
+      met: ['toki', 'sae', 'isuke', 'sohei', 'mine'].filter((n) => g.story.hasMet(n)),
+      notebook: vis('.notebook-layer'),
+      notebookText: q('.notebook-body')?.textContent ?? '',
+      activeTab: q('.notebook-tab.is-active')?.dataset.tab ?? null,
+      ledger: vis('.ledger-layer'),
+      ledgerText: q('.ledger-body')?.textContent ?? '',
+      ledgerNote: q('.ledger-note')?.textContent ?? '',
+      pause: vis('.pause-layer'),
+      pauseStatus: q('.pause-layer .menu-status')?.textContent ?? '',
+      notice: vis('.notice-layer'),
+      noticeTitle: q('.notice-layer .menu-title')?.textContent ?? '',
+      badge: vis('.hud-notebook-badge'),
+      toasts: [...document.querySelectorAll('.toast')].map((t) => t.textContent),
+      objective: q('.hud-objective-text')?.textContent ?? '',
+      player: { x: g.player.x, z: g.player.z },
+    };
+  });
+const waitFor2 = async (cond, timeoutMs = 8000) => {
+  const t0 = Date.now();
+  let s = await g2();
+  while (!cond(s) && Date.now() - t0 < timeoutMs) { await wait(100); s = await g2(); }
+  return s;
+};
+const press2 = async (key, cond, timeoutMs = 4000) => { await page.keyboard.press(key); return waitFor2(cond, timeoutMs); };
+
+// 情報を得ると通知と手帳の「新しい記録」表示が出る（Phase 1 の確認で伊助の事情を知った直後）
+const t0 = await g2();
+check('[P2] 情報を得ると「手帳に新しい記録」が表示される', t0.badge, t0.toasts.join(' / '));
+
+// 手帳（Tab）
+const n1 = await press2('Tab', (s) => s.notebook);
+check('[P2] Tab で手帳が開く', n1.mode === 'notebook' && n1.notebook);
+const n2 = await press2('Digit2', (s) => s.activeTab === 'known');
+check('[P2] 「分かったこと」に伊助の事情が載り、前の記述が「これまでの記録」に残る',
+  /刈り入れと重なる/.test(n2.notebookText) && /これまでの記録（1）/.test(n2.notebookText), n2.notebookText.slice(0, 120));
+const n3 = await press2('Digit1', (s) => s.activeTab === 'people');
+check('[P2] 「人物」に会った住民と現在の意向が載る', /伊助/.test(n3.notebookText) && /断っている/.test(n3.notebookText) && /トキ/.test(n3.notebookText) && !/ミネ/.test(n3.notebookText), n3.notebookText.slice(0, 120));
+const n4 = await press2('ArrowRight', (s) => s.activeTab === 'known');
+check('[P2] ←→ で区分を切り替えられる', n4.activeTab === 'known');
+await page.screenshot({ path: `${OUT}/shot-20-notebook.png` });
+const nbPos0 = await state();
+await page.keyboard.down('KeyW');
+await wait(800);
+await page.keyboard.up('KeyW');
+const nbPos1 = await state();
+check('[P2] 手帳を開いている間は歩かない', Math.hypot(nbPos1.x - nbPos0.x, nbPos1.z - nbPos0.z) < 0.05);
+const n5 = await press2('Tab', (s) => !s.notebook);
+check('[P2] Tab で手帳を閉じると探索に戻り、「新しい記録」の表示が消える', n5.mode === 'explore' && !n5.notebook && !n5.badge);
+
+// ポーズ（Esc）
+const p1 = await press2('Escape', (s) => s.pause);
+check('[P2] 探索中の Esc でポーズ画面が開く', p1.mode === 'pause' && p1.pause);
+await page.screenshot({ path: `${OUT}/shot-21-pause.png` });
+const p2 = await press2('Escape', (s) => !s.pause);
+check('[P2] もう一度 Esc で再開する', p2.mode === 'explore' && !p2.pause);
+
+// 会話の中断（Esc）
+await place(3.4, 12.4, Math.PI);
+await waitFor((u) => u.target === 'sae');
+await press('KeyE', (u) => u.dialogueVisible);
+await wait(400);
+const c1 = await press2('Escape', (s) => !s.active);
+await wait(500);
+const c1b = await g2();
+check('[P2] 会話中の Esc で会話を中断し、探索に戻る（ポーズは開かない）', c1b.mode === 'explore' && !c1b.active && !c1b.pause, c1b.mode);
+check('[P2] 中断しても会ったことと得た情報は残り、「最後まで話した」にはならない',
+  c1.met.includes('sae') && c1.learned.includes('sae.schedule/needsHelp') && !c1.flags.includes('talked:sae'), c1.learned.join(','));
+
+// 結帳
+await place(5.8, 12.0, Math.PI);
+await waitFor((u) => u.target === 'ledger');
+await press('KeyE', (u) => u.dialogueVisible);
+const l0 = await finishDialogue();
+const l1 = await waitFor2((s) => s.ledger);
+check('[P2] 結帳を調べると専用画面が開く', l1.mode === 'ledger' && l1.ledger && !l0.active);
+check('[P2] 結帳に過去の協力と返しの状態が書かれている', /伊助家 → サエ家/.test(l1.ledgerText) && /返し まだ/.test(l1.ledgerText) && /返し 済/.test(l1.ledgerText));
+check('[P2] 結帳では現在の意向を過去の記録と別の欄に示す', /今の意向（手帳より・この記録とは別）/.test(l1.ledgerText) && /断っている/.test(l1.ledgerText));
+check('[P2] 結帳が創作の記録であることを画面に明記している', /ゲームのために創作した記録/.test(l1.ledgerNote));
+await page.screenshot({ path: `${OUT}/shot-22-ledger.png` });
+const l2 = await press2('Escape', (s) => !s.ledger);
+check('[P2] Esc で結帳を閉じて探索に戻る', l2.mode === 'explore');
+
+// 結帳を読んだ後は、伊助に過去の協力について聞ける
+await place(33.5, 8.1, Math.PI);
+await waitFor((u) => u.target === 'isuke');
+await press('KeyE', (u) => u.dialogueVisible);
+let i1 = await ui();
+for (let i = 0; i < 10 && i1.choices.length === 0; i++) {
+  const before = i1.text;
+  i1 = await press('KeyE', (u) => u.text !== before || u.choices.length > 0, 3000);
+}
+check('[P2] 結帳を読んだ後、伊助に新しい選択肢が出る', i1.choices.some((c) => /結帳/.test(c.text)), i1.choices.map((c) => c.text).join(' / '));
+await finishDialogue((u) => `Digit${u.choices.findIndex((c) => /結帳/.test(c.text)) + 1}`);
+const i2 = await g2();
+check('[P2] 過去の協力について聞くと手帳が更新されるが、現在の意向は変わらない',
+  i2.learned.includes('isuke.pastHelp/isukeView') && /断っている/.test(await page.evaluate(() => window.__yui.story.consentStatus('isuke', 'roofDay') === 'declined' ? '断っている' : '')));
+
+// 記録（セーブ）→ 再読み込み → 続きから
+await page.keyboard.press('Escape');
+await waitFor2((s) => s.pause);
+await page.click('.pause-layer .menu-item[data-id="save"]');
+const sv1 = await waitFor2((s) => /記録しました/.test(s.pauseStatus));
+check('[P2] ポーズ画面から記録できる', /記録しました/.test(sv1.pauseStatus), sv1.pauseStatus);
+await press2('Escape', (s) => !s.pause);
+const beforeReload = await g2();
+await page.reload({ waitUntil: 'networkidle0' });
+await wait(2500);
+const r1 = await waitFor2((s) => s.notice);
+check('[P2] 再読み込みすると「前回の記録があります」が出る', r1.notice && /前回の記録/.test(r1.noticeTitle) && r1.mode === 'notice', r1.noticeTitle);
+await page.screenshot({ path: `${OUT}/shot-23-continue.png` });
+const r1b = await press2('Escape', () => false, 800);
+check('[P2] お知らせは Esc で誤って閉じない', r1b.notice && r1b.mode === 'notice');
+await page.click('.notice-layer .menu-item[data-id="continue"]');
+const r2 = await waitFor2((s) => !s.notice);
+check('[P2] 「続きから」で記録した状態に戻る',
+  r2.mode === 'explore' && JSON.stringify(r2.learned) === JSON.stringify(beforeReload.learned) && JSON.stringify(r2.met) === JSON.stringify(beforeReload.met) &&
+  Math.hypot(r2.player.x - beforeReload.player.x, r2.player.z - beforeReload.player.z) < 0.5,
+  `情報 ${r2.learned.length} 件 / 位置 (${r2.player.x.toFixed(1)}, ${r2.player.z.toFixed(1)})`);
+check('[P2] 読み込んだ状態から目的表示が復元される', r2.objective === beforeReload.objective, r2.objective);
+
+// 壊れた記録
+await page.evaluate(() => localStorage.setItem('yui-no-yakusoku:save:1', '{"format":"yui-no-yakusoku-save","version":1,"story":'));
+await page.reload({ waitUntil: 'networkidle0' });
+await wait(2500);
+const b1 = await waitFor2((s) => s.notice);
+check('[P2] 壊れた記録は読み込まずに知らせる', /読み込めませんでした/.test(b1.noticeTitle), b1.noticeTitle);
+await page.click('.notice-layer .menu-item[data-id="ok"]');
+const b2 = await waitFor2((s) => !s.notice);
+const kept = await page.evaluate(() => [localStorage.getItem('yui-no-yakusoku:save:1'), localStorage.getItem('yui-no-yakusoku:save:1:corrupt')]);
+check('[P2] 壊れた記録は別名で残し、最初から遊べる', b2.mode === 'explore' && b2.learned.length === 0 && kept[0] === null && typeof kept[1] === 'string');
+const b3 = await holdUntil(['KeyW'], (s) => s.z < 29, 8000);
+check('[P2] 壊れた記録の後も操作できる', b3.z < 29, `z=${b3.z.toFixed(2)}`);
+
+// 最初からやり直す
+await page.evaluate(() => { window.__yui.story.learn('sae.roof', 'worn'); });
+await page.keyboard.press('Escape');
+await waitFor2((s) => s.pause);
+await page.click('.pause-layer .menu-item[data-id="new"]');
+await waitFor2((s) => s.notice);
+await page.click('.notice-layer .menu-item[data-id="yes"]');
+const nw = await waitFor2((s) => !s.notice);
+check('[P2] 「最初からやり直す」で状態が初期化される', nw.mode === 'explore' && nw.learned.length === 0 && nw.objective === '広場にいるトキに話しかける');
 
 // F3 デバッグ表示
 await page.keyboard.press('F3');

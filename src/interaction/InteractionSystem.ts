@@ -3,16 +3,20 @@ import { DialogueRunner, type DialogueView } from '../dialogue/DialogueRunner';
 import type { DialogueScript } from '../dialogue/types';
 import type { StoryState } from '../story/StoryState';
 import { findTarget, type Pose } from './targeting';
-import { completionFlag, type Interactable } from './types';
+import { completionFlag, sourceLabel, type Interactable } from './types';
 
 export interface InteractionEvents {
   interactionStarted: { readonly id: string };
-  interactionEnded: { readonly id: string };
+  /** cancelled：Esc などで途中でやめた（最後まで進めたときは false）。 */
+  interactionEnded: { readonly id: string; readonly cancelled: boolean };
 }
 
 /**
  * 探索中の「近くの対象を選ぶ → E で会話・調査を始める → 進める → 終えて探索に戻る」を管理する。
  * DOM にも Three.js にも依存しない（UI と 3D 表示は Game が view を読んで反映する）。
+ *
+ * 途中でやめた場合（cancel）：それまでに確定した選択・得た情報はそのまま残す（取り消さない）。
+ * 「最後まで話した／調べた」のフラグだけは立てないので、次回も最初の入口から話せる。
  */
 export class InteractionSystem {
   private targetDef: Interactable | null = null;
@@ -65,7 +69,9 @@ export class InteractionSystem {
     if (!target) return false;
     const script = this.dialogues[target.dialogue];
     if (!script) throw new Error(`会話データ ${target.dialogue} がありません（${target.id}）`);
-    this.active = { target, runner: new DialogueRunner(script, this.story) };
+    // 住民は話し始めた時点で「会った」ことにする（途中でやめても残る）
+    if (target.kind === 'npc') this.story.markMet(target.character);
+    this.active = { target, runner: new DialogueRunner(script, this.story, { source: sourceLabel(target) }) };
     this.selectedIndex = 0;
     this.events?.emit('interactionStarted', { id: target.id });
     this.finishIfDone();
@@ -94,6 +100,16 @@ export class InteractionSystem {
     return ok;
   }
 
+  /** 会話・調査を途中でやめる（Esc）。会話中でなければ false。 */
+  cancel(): boolean {
+    if (!this.active) return false;
+    const { target } = this.active;
+    this.active = null;
+    this.selectedIndex = 0;
+    this.events?.emit('interactionEnded', { id: target.id, cancelled: true });
+    return true;
+  }
+
   select(index: number): void {
     const count = this.view?.choices.length ?? 0;
     if (index >= 0 && index < count) this.selectedIndex = index;
@@ -115,6 +131,6 @@ export class InteractionSystem {
     const { target } = this.active;
     this.active = null;
     this.story.set(completionFlag(target));
-    this.events?.emit('interactionEnded', { id: target.id });
+    this.events?.emit('interactionEnded', { id: target.id, cancelled: false });
   }
 }

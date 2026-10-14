@@ -93,8 +93,8 @@ export class InputManager {
     } else {
       this.pressed.delete(e.code);
     }
-    // 矢印キー・Space でのスクロールや F3（ブラウザの検索）を抑止する
-    if (e.code.startsWith('Arrow') || e.code === 'F3' || e.code === 'Space') e.preventDefault();
+    // 矢印キー・Space でのスクロール、Tab でのフォーカス移動、F3（ブラウザの検索）を抑止する
+    if (e.code.startsWith('Arrow') || e.code === 'F3' || e.code === 'Space' || e.code === 'Tab') e.preventDefault();
   }
 
   private onPointerDown(e: PointerEvent): void {

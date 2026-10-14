@@ -6,6 +6,7 @@ import { findTarget } from '../src/interaction/targeting';
 import type { Interactable } from '../src/interaction/types';
 import { flag } from '../src/story/conditions';
 import { StoryState } from '../src/story/StoryState';
+import { TEST_DEFS } from './helpers/storyDefs';
 
 const npc = (id: string, x: number, z: number, range = 2.5): Interactable => ({
   kind: 'npc',
@@ -86,8 +87,8 @@ function setup() {
   const bus = new EventBus<InteractionEvents>();
   const log: string[] = [];
   bus.on('interactionStarted', ({ id }) => log.push(`start:${id}`));
-  bus.on('interactionEnded', ({ id }) => log.push(`end:${id}`));
-  const story = new StoryState();
+  bus.on('interactionEnded', ({ id, cancelled }) => log.push(`end:${id}${cancelled ? '(cancel)' : ''}`));
+  const story = new StoryState(TEST_DEFS);
   const villager = { ...npc('villager', 0, 2), dialogue: 'villager' };
   const field = { ...obj('field', 10, 2), dialogue: 'field' };
   const sys = new InteractionSystem([villager, field], dialogues, story, bus);
@@ -161,5 +162,24 @@ describe('InteractionSystem', () => {
     expect(sys.selected).toBe(1);
     sys.select(9); // 範囲外は無視
     expect(sys.selected).toBe(1);
+  });
+
+  it('途中でやめると探索に戻り、確定した選択は残るが「最後まで話した」にはならない', () => {
+    const { sys, story, log } = setup();
+    sys.updateTarget(facingPlusZ);
+    sys.interact();
+    // 話し始めた時点で「会った」ことになる
+    expect(story.hasMet('villager')).toBe(true);
+    sys.advance();
+    expect(sys.cancel()).toBe(true);
+    expect(sys.isActive).toBe(false);
+    expect(sys.view).toBeNull();
+    expect(story.has('talked:villager')).toBe(false);
+    expect(log).toEqual(['start:villager', 'end:villager(cancel)']);
+    // 会話中でなければ何もしない
+    expect(sys.cancel()).toBe(false);
+    // 再び話しかけられる
+    sys.updateTarget(facingPlusZ);
+    expect(sys.interact()).toBe(true);
   });
 });

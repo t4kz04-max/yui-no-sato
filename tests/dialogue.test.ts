@@ -4,6 +4,7 @@ import type { DialogueScript } from '../src/dialogue/types';
 import { validateScript } from '../src/dialogue/validate';
 import { flag, setFlag } from '../src/story/conditions';
 import { StoryState } from '../src/story/StoryState';
+import { TEST_DEFS } from './helpers/storyDefs';
 
 const SPEAKERS = new Set(['a', 'b']);
 
@@ -30,7 +31,7 @@ const script: DialogueScript = {
 
 describe('DialogueRunner', () => {
   it('ページを送り、選択肢は最後のページで出る', () => {
-    const state = new StoryState();
+    const state = new StoryState(TEST_DEFS);
     const r = new DialogueRunner(script, state);
     expect(r.view).toMatchObject({ speaker: 'a', text: '1ページ目', page: 0, pageCount: 2, choices: [] });
     // 場面に入った時点で効果が適用される
@@ -45,7 +46,7 @@ describe('DialogueRunner', () => {
   });
 
   it('選択肢を選ぶと効果が適用され、行き先へ進み、最後に終わる', () => {
-    const state = new StoryState();
+    const state = new StoryState(TEST_DEFS);
     const r = new DialogueRunner(script, state);
     r.advance();
     expect(r.choose(0)).toBe(true);
@@ -59,14 +60,14 @@ describe('DialogueRunner', () => {
   });
 
   it('行き先のない選択肢を選ぶと会話が終わる', () => {
-    const r = new DialogueRunner(script, new StoryState());
+    const r = new DialogueRunner(script, new StoryState(TEST_DEFS));
     r.advance();
     r.choose(1); // 「やめる」（表示上の2番目）
     expect(r.finished).toBe(true);
   });
 
   it('状態によって入口と選択肢が変わる', () => {
-    const state = new StoryState();
+    const state = new StoryState(TEST_DEFS);
     state.set('clue');
     const r = new DialogueRunner(script, state);
     r.advance();
@@ -85,7 +86,7 @@ describe('DialogueRunner', () => {
   });
 
   it('範囲外の選択や、ページ途中での選択は無視する', () => {
-    const r = new DialogueRunner(script, new StoryState());
+    const r = new DialogueRunner(script, new StoryState(TEST_DEFS));
     expect(r.choose(0)).toBe(false); // まだ1ページ目
     r.advance();
     expect(r.choose(5)).toBe(false);

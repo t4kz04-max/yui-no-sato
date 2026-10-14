@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { EventBus } from '../core/EventBus';
 import { GameLoop } from '../core/GameLoop';
+import { overlapsAny } from '../core/collision';
 import { dampAngle, wrapAngle } from '../core/math';
 import { InputManager } from '../input/InputManager';
 import {
@@ -17,10 +18,15 @@ import { setupLighting } from '../render/lighting';
 import { Hud } from '../ui/Hud';
 import { DialogueBox } from '../ui/DialogueBox';
 import { InteractionPrompt } from '../ui/InteractionPrompt';
+import { NotebookView, type NotebookTab } from '../ui/NotebookView';
+import { LedgerView } from '../ui/LedgerView';
+import { MenuPanel, type MenuContent } from '../ui/MenuPanel';
+import { Toasts } from '../ui/Toasts';
 import { World } from '../world/World';
 import { PLAYER_START, type LocationId } from '../world/layout';
 import { resolveArea } from '../world/areas';
 import { StoryState } from '../story/StoryState';
+import { CONSENT_LABEL } from '../story/types';
 import { InteractionSystem } from '../interaction/InteractionSystem';
 import { InteractionMarker } from '../interaction/InteractionMarker';
 import { ACTION_LABEL, type Interactable } from '../interaction/types';
@@ -28,19 +34,32 @@ import { CHARACTERS, type CharacterId } from '../content/characters';
 import { DIALOGUES } from '../content/dialogues';
 import { INTERACTABLES, NPCS, npcColliders } from '../content/interactables';
 import { currentObjective } from '../content/objectives';
+import { HOUSEHOLDS, STORY_DEFS } from '../content/story';
+import { LEDGER, LEDGER_NOTE, LEDGER_TITLE } from '../content/ledger';
+import { buildLedger, buildNotebook, type JournalSources } from '../journal/models';
+import { createSave, type SaveFile } from '../save/saveData';
+import { SaveStore, browserStorage } from '../save/SaveStore';
+import { allowsExploration, nextMode, type UiAction, type UiMode } from './modes';
 import type { GameEvents } from './events';
 
 /** 会話中のカメラ（相手と自分が斜めに見える構図）。 */
 const TALK_CAMERA = { yawOffset: 0.85, pitch: 0.2, distance: 5.2 } as const;
 /** 案内表示を出す高さ（住民の頭上）。 */
 const NPC_PROMPT_HEIGHT = 2.55;
+const JOURNAL_SOURCES: JournalSources = { characters: CHARACTERS, households: HOUSEHOLDS };
+const NOTEBOOK_TAB_KEYS: ReadonlyArray<[string, NotebookTab]> = [
+  ['Digit1', 'people'],
+  ['Digit2', 'known'],
+  ['Digit3', 'unconfirmed'],
+  ['Digit4', 'promises'],
+];
 
 /**
  * ゲーム全体の組み立てと更新順序の管理。
  *
- * 更新順：入力 → 会話・調査（InteractionSystem） → プレイヤー状態 → 見た目 → カメラ → 描画 → UI。
- * 物語の状態（StoryState）と会話の進行（InteractionSystem）は 3D・DOM に依存せず、
- * ここで view を読んで 3D 表示と UI に反映する。
+ * 更新順：入力（画面の状態に応じて振り分け） → 会話・調査 → プレイヤー状態 → 見た目 → カメラ → 描画 → UI。
+ * 物語の状態（StoryState）・会話の進行（InteractionSystem）・画面の状態遷移（modes.ts）は
+ * 3D・DOM に依存せず、ここで状態を読んで 3D 表示と UI に反映する。
  */
 export class Game {
   readonly scene = new THREE.Scene();
@@ -50,6 +69,7 @@ export class Game {
   readonly events = new EventBus<GameEvents>();
   readonly story: StoryState;
   readonly interaction: InteractionSystem;
+  readonly saveStore: SaveStore;
 
   private readonly renderer: THREE.WebGLRenderer;
   private readonly input: InputManager;
@@ -60,13 +80,23 @@ export class Game {
   private readonly hud: Hud;
   private readonly dialogueBox: DialogueBox;
   private readonly prompt: InteractionPrompt;
+  private readonly notebook: NotebookView;
+  private readonly ledger: LedgerView;
+  private readonly pauseMenu: MenuPanel;
+  private readonly notice: MenuPanel;
+  private readonly toasts: Toasts;
   private readonly loop: GameLoop;
   private readonly disposers: Array<() => void> = [];
   private readonly projected = new THREE.Vector3();
 
+  private uiMode: UiMode = 'explore';
   private area: LocationId | null = null;
   /** 会話前のカメラの上下角と距離（会話後に戻す）。 */
   private savedCamera: { pitch: number; distance: number } | null = null;
+  /** 手帳を最後に閉じた時点の記録の順番（これより新しいものに「新」を付ける）。 */
+  private notebookSeenOrder = 0;
+  /** お知らせ画面のボタンごとの処理。 */
+  private noticeHandlers: Record<string, () => void> = {};
 
   private fpsFrames = 0;
   private fpsTime = 0;
@@ -75,11 +105,20 @@ export class Game {
   constructor(canvasRoot: HTMLElement, hudRoot: HTMLElement) {
     this.hud = new Hud(hudRoot);
     this.prompt = new InteractionPrompt(hudRoot);
+    this.toasts = new Toasts(hudRoot);
     this.dialogueBox = new DialogueBox(hudRoot, {
       onAdvance: () => this.advanceDialogue(),
       onChoose: (i) => this.interaction.choose(i),
       onHover: (i) => this.interaction.select(i),
     });
+    this.notebook = new NotebookView(hudRoot, () => this.dispatch('close'));
+    this.ledger = new LedgerView(hudRoot, LEDGER_TITLE, LEDGER_NOTE, {
+      onClose: () => this.dispatch('close'),
+      onNotebook: () => this.dispatch('openNotebook'),
+    });
+    this.pauseMenu = new MenuPanel(hudRoot, 'pause-layer', (id) => this.onPauseItem(id));
+    this.notice = new MenuPanel(hudRoot, 'notice-layer', (id) => this.noticeHandlers[id]?.());
+
     this.renderer = createRenderer(canvasRoot);
     this.disposers.push(bindResize(canvasRoot, this.renderer, this.camera));
 
@@ -95,16 +134,10 @@ export class Game {
       this.scene.add(view.root);
     }
 
-    this.story = new StoryState(this.events);
+    this.story = new StoryState(STORY_DEFS, this.events);
     this.interaction = new InteractionSystem(INTERACTABLES, DIALOGUES, this.story, this.events);
-    this.events.on('interactionStarted', ({ id }) => this.onInteractionStarted(id));
-    this.events.on('interactionEnded', () => this.onInteractionEnded());
-    this.events.on('flagSet', () => this.hud.setObjective(currentObjective(this.story)));
-    this.events.on('areaEntered', ({ location }) => {
-      this.story.set(`visited:${location}`);
-      const label = this.world.locations.find((l) => l.id === location)?.label;
-      if (label) this.hud.showArea(label);
-    });
+    this.saveStore = new SaveStore(browserStorage(), STORY_DEFS);
+    this.bindEvents();
     this.hud.setObjective(currentObjective(this.story));
 
     this.player = createPlayerState(PLAYER_START.position, PLAYER_START.yaw, this.world);
@@ -117,6 +150,7 @@ export class Game {
     this.input = new InputManager(this.renderer.domElement);
     this.disposers.push(() => this.input.dispose());
     this.loop = new GameLoop((dt) => this.update(dt));
+    this.checkSaveOnStart();
   }
 
   start(): void {
@@ -134,14 +168,103 @@ export class Game {
     return this.cameraRig.yaw;
   }
 
+  get mode(): UiMode {
+    return this.uiMode;
+  }
+
+  // ───────── イベントの接続 ─────────
+
+  private bindEvents(): void {
+    const refreshObjective = () => this.hud.setObjective(currentObjective(this.story));
+    this.events.on('interactionStarted', ({ id }) => this.onInteractionStarted(id));
+    this.events.on('interactionEnded', ({ id, cancelled }) => this.onInteractionEnded(id, cancelled));
+    this.events.on('flagSet', refreshObjective);
+    this.events.on('topicLearned', ({ topic, previous }) => {
+      refreshObjective();
+      const title = STORY_DEFS.topics[topic]?.title ?? topic;
+      this.toasts.push('手帳', previous ? `「${title}」を書き足した` : `「${title}」を書き留めた`);
+      this.refreshNotebookBadge();
+    });
+    this.events.on('consentChanged', ({ npc, request, status }) => {
+      const who = CHARACTERS[npc as CharacterId]?.name ?? npc;
+      const what = STORY_DEFS.requests[request]?.label ?? request;
+      this.toasts.push('意向', `${who}：${what}は「${CONSENT_LABEL[status]}」`);
+      this.refreshNotebookBadge();
+    });
+    this.events.on('promiseRecorded', () => {
+      this.toasts.push('約束', '新しい約束を書き留めた');
+      this.refreshNotebookBadge();
+    });
+    this.events.on('storyRestored', () => {
+      refreshObjective();
+      this.refreshNotebookBadge();
+    });
+    this.events.on('areaEntered', ({ location }) => {
+      this.story.set(`visited:${location}`);
+      const label = this.world.locations.find((l) => l.id === location)?.label;
+      if (label) this.hud.showArea(label);
+    });
+  }
+
+  // ───────── 画面の状態 ─────────
+
+  /** 画面の状態を遷移させ、表示を合わせる。 */
+  private dispatch(action: UiAction): void {
+    const prev = this.uiMode;
+    const next = nextMode(prev, action);
+    if (next === prev) return;
+    this.uiMode = next;
+    if (prev === 'notebook') {
+      this.notebook.hide();
+      this.notebookSeenOrder = buildNotebook(this.story, JOURNAL_SOURCES).latestOrder;
+      this.refreshNotebookBadge();
+    }
+    if (prev === 'ledger') this.ledger.hide();
+    if (prev === 'pause') this.pauseMenu.hide();
+    if (prev === 'notice') this.notice.hide();
+
+    if (next === 'notebook') this.notebook.show(buildNotebook(this.story, JOURNAL_SOURCES), this.notebookSeenOrder);
+    if (next === 'ledger') this.ledger.show(buildLedger(this.story, LEDGER, JOURNAL_SOURCES));
+    if (next === 'pause') this.pauseMenu.show(this.pauseContent());
+    // お知らせの中身は showNotice で表示する
+    this.hud.setOverlayMode(next !== 'explore' && next !== 'dialogue');
+    // 画面を切り替えたら、押しっぱなしのキーや溜まった視点操作を捨てる
+    this.input.reset();
+  }
+
+  private refreshNotebookBadge(): void {
+    this.hud.setNotebookBadge(buildNotebook(this.story, JOURNAL_SOURCES).latestOrder > this.notebookSeenOrder);
+  }
+
+  // ───────── 毎フレームの更新 ─────────
+
   private update(dt: number): void {
     if (this.input.wasPressed('F3')) this.hud.toggleDebug();
     if (this.input.wasPressed('KeyH')) this.hud.toggleHelp();
 
-    // 会話・調査の入力。会話中は移動・視点の入力を止める
-    if (this.interaction.isActive) this.handleDialogueInput();
-    else if (this.input.wasPressed('KeyE')) this.interaction.interact();
-    this.input.enabled = !this.interaction.isActive;
+    switch (this.uiMode) {
+      case 'explore':
+        this.handleExploreInput();
+        break;
+      case 'dialogue':
+        this.handleDialogueInput();
+        break;
+      case 'notebook':
+        this.handleNotebookInput();
+        break;
+      case 'ledger':
+        if (this.input.wasPressed('Escape')) this.dispatch('esc');
+        else if (this.input.wasPressed('Tab')) this.dispatch('tab');
+        break;
+      case 'pause':
+        if (this.input.wasPressed('Escape')) this.dispatch('esc');
+        else this.handleMenuInput(this.pauseMenu);
+        break;
+      case 'notice':
+        this.handleMenuInput(this.notice);
+        break;
+    }
+    this.input.enabled = allowsExploration(this.uiMode);
 
     updatePlayer(this.player, this.input.getMoveIntent(), this.cameraRig.yaw, dt, this.world);
     const partner = this.interaction.partner;
@@ -168,8 +291,20 @@ export class Game {
     this.updateStats(dt);
   }
 
+  private handleExploreInput(): void {
+    const input = this.input;
+    if (input.wasPressed('Escape')) this.dispatch('esc');
+    else if (input.wasPressed('Tab')) this.dispatch('tab');
+    else if (input.wasPressed('KeyE')) this.interaction.interact();
+  }
+
   private handleDialogueInput(): void {
     const input = this.input;
+    // Esc：会話・調査を中断する。それまでに確定した選択・得た情報は取り消さない
+    if (input.wasPressed('Escape')) {
+      this.interaction.cancel();
+      return;
+    }
     const box = this.dialogueBox;
     const choices = box.isRevealing ? 0 : (this.interaction.view?.choices.length ?? 0);
     // 選択肢が出た直後はキーでの決定を受け付けない（文字送りを飛ばすつもりの操作が選択にならないように）
@@ -190,6 +325,26 @@ export class Game {
     }
   }
 
+  private handleNotebookInput(): void {
+    const input = this.input;
+    if (input.wasPressed('Escape')) return this.dispatch('esc');
+    if (input.wasPressed('Tab')) return this.dispatch('tab');
+    if (input.wasPressed('ArrowLeft') || input.wasPressed('KeyA') || input.wasPressed('KeyQ')) this.notebook.moveTab(-1);
+    if (input.wasPressed('ArrowRight') || input.wasPressed('KeyD') || input.wasPressed('KeyE')) this.notebook.moveTab(1);
+    for (const [key, tab] of NOTEBOOK_TAB_KEYS) if (input.wasPressed(key)) this.notebook.setTab(tab);
+  }
+
+  private handleMenuInput(menu: MenuPanel): void {
+    const input = this.input;
+    if (input.wasPressed('ArrowUp') || input.wasPressed('KeyW') || input.wasPressed('ArrowLeft')) menu.moveSelection(-1);
+    if (input.wasPressed('ArrowDown') || input.wasPressed('KeyS') || input.wasPressed('ArrowRight')) menu.moveSelection(1);
+    if (input.wasPressed('Enter') || input.wasPressed('NumpadEnter') || input.wasPressed('Space') || input.wasPressed('KeyE')) {
+      menu.activate();
+    }
+  }
+
+  // ───────── 会話・調査 ─────────
+
   /** 決定キー：文字送りの途中なら全文を出し、そうでなければ進める・選ぶ。 */
   private confirmDialogue(): void {
     if (this.dialogueBox.isRevealing) this.dialogueBox.revealAll();
@@ -206,7 +361,7 @@ export class Game {
     // 歩いていた勢いを止める
     this.player.velocityX = 0;
     this.player.velocityZ = 0;
-    this.input.reset();
+    this.dispatch('dialogueStarted');
     this.hud.setDialogueMode(true);
 
     const partner = this.interaction.partner;
@@ -222,15 +377,23 @@ export class Game {
     orbit.targetDistance = Math.min(orbit.targetDistance, TALK_CAMERA.distance);
   }
 
-  private onInteractionEnded(): void {
+  private onInteractionEnded(id: string, cancelled: boolean): void {
     this.hud.setDialogueMode(false);
     this.dialogueBox.hide();
-    if (this.savedCamera) {
-      const orbit = this.cameraRig.orbit;
-      orbit.targetPitch = this.savedCamera.pitch;
-      orbit.targetDistance = this.savedCamera.distance;
-      this.savedCamera = null;
-    }
+    this.restoreCamera();
+    this.dispatch('dialogueEnded');
+    // 会話・調査のたびに自動で記録する（中断した場合も、それまでに確定したことを残す）
+    this.saveGame();
+    const def = INTERACTABLES.find((i) => i.id === id);
+    if (!cancelled && def?.kind === 'object' && def.opens === 'ledger') this.dispatch('openLedger');
+  }
+
+  private restoreCamera(): void {
+    if (!this.savedCamera) return;
+    const orbit = this.cameraRig.orbit;
+    orbit.targetPitch = this.savedCamera.pitch;
+    orbit.targetDistance = this.savedCamera.distance;
+    this.savedCamera = null;
   }
 
   /** 会話中は自分と相手の間を注視する。 */
@@ -243,6 +406,157 @@ export class Game {
     };
   }
 
+  // ───────── 記録（セーブ・ロード） ─────────
+
+  /** 現在の状態を記録する。会話中は呼ばない（会話の途中の状態を残さない）。 */
+  saveGame(): boolean {
+    if (this.interaction.isActive) return false;
+    return this.saveStore.save(createSave(this.story.snapshot(), this.player));
+  }
+
+  private checkSaveOnStart(): void {
+    const result = this.saveStore.load();
+    if (result.ok) {
+      const when = new Date(result.save.savedAt);
+      this.showNotice(
+        {
+          title: '前回の記録があります',
+          body: `記録した日時：${Number.isNaN(when.getTime()) ? '不明' : when.toLocaleString('ja-JP')}`,
+          items: [
+            { id: 'continue', label: '続きから' },
+            { id: 'new', label: '最初から（記録は次の自動記録で上書きされます）' },
+          ],
+          defaultId: 'continue',
+        },
+        { continue: () => this.applySave(result.save), new: () => this.resetToNewGame() },
+      );
+    } else if (result.reason === 'corrupt' || result.reason === 'unsupported') {
+      this.showNotice(
+        {
+          title: '記録を読み込めませんでした',
+          body:
+            (result.reason === 'corrupt' ? '保存されていた記録が壊れていました。' : 'この版では読めない記録でした。') +
+            '最初から始めます。読めなかった記録は消さずに別名で残してあります。',
+          items: [{ id: 'ok', label: '最初から始める' }],
+        },
+        { ok: () => undefined },
+      );
+    } else if (result.reason === 'unavailable') {
+      this.toasts.push('記録', 'この環境では進み具合を記録できません');
+    }
+  }
+
+  private pauseContent(status = ''): MenuContent {
+    return {
+      title: 'ポーズ',
+      items: [
+        { id: 'resume', label: '再開する［Esc］' },
+        { id: 'notebook', label: '手帳を開く［Tab］' },
+        { id: 'save', label: '記録する' },
+        { id: 'load', label: '最後の記録から再開する' },
+        { id: 'new', label: '最初からやり直す' },
+      ],
+      defaultId: 'resume',
+      status: status || '会話や調査を終えるたびに、自動で記録されます。',
+    };
+  }
+
+  private onPauseItem(id: string): void {
+    switch (id) {
+      case 'resume':
+        return this.dispatch('close');
+      case 'notebook':
+        return this.dispatch('openNotebook');
+      case 'save': {
+        const ok = this.saveGame();
+        const time = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+        this.pauseMenu.setStatus(ok ? `記録しました（${time}）` : '記録できませんでした（保存領域を使えません）');
+        return;
+      }
+      case 'load':
+        return this.showNotice(
+          {
+            title: '最後の記録から再開しますか？',
+            body: '最後に記録した時点に戻ります。それ以降の進み具合は失われます。',
+            items: [
+              { id: 'no', label: 'やめる' },
+              { id: 'yes', label: '再開する' },
+            ],
+            defaultId: 'no',
+          },
+          { no: () => undefined, yes: () => this.loadFromStore() },
+        );
+      case 'new':
+        return this.showNotice(
+          {
+            title: '最初からやり直しますか？',
+            body: '今の進み具合は失われます（記録は、次に自動で記録されるときに上書きされます）。',
+            items: [
+              { id: 'no', label: 'やめる' },
+              { id: 'yes', label: '最初からやり直す' },
+            ],
+            defaultId: 'no',
+          },
+          { no: () => undefined, yes: () => this.resetToNewGame() },
+        );
+    }
+  }
+
+  private loadFromStore(): void {
+    const result = this.saveStore.load();
+    if (result.ok) {
+      this.applySave(result.save);
+      if (result.warnings.length > 0) console.warn('記録の読込で補正した項目', result.warnings);
+      this.toasts.push('記録', '最後の記録から再開しました');
+    } else {
+      this.toasts.push('記録', result.reason === 'empty' ? '記録がまだありません' : '記録を読み込めませんでした');
+    }
+  }
+
+  /** お知らせ画面を出す。どのボタンでも閉じてから処理する（抜け出せない状態を作らない）。 */
+  private showNotice(content: MenuContent, handlers: Record<string, () => void>): void {
+    this.dispatch('openNotice');
+    if (this.uiMode !== 'notice') return;
+    this.noticeHandlers = Object.fromEntries(
+      Object.entries(handlers).map(([id, fn]) => [
+        id,
+        () => {
+          this.noticeHandlers = {};
+          this.dispatch('close');
+          fn();
+        },
+      ]),
+    );
+    this.notice.show(content);
+  }
+
+  private applySave(save: SaveFile): void {
+    this.story.restore(save.story);
+    // 位置が歩けない場所（配置変更後の古い記録など）ならスタート地点に戻す
+    const { x, z } = save.player;
+    const b = this.world.bounds;
+    const valid =
+      x > b.minX && x < b.maxX && z > b.minZ && z < b.maxZ && !overlapsAny({ x, z }, DEFAULT_PLAYER_TUNING.radius, this.world.colliders);
+    this.placePlayer(valid ? save.player : { ...PLAYER_START.position, heading: PLAYER_START.yaw });
+  }
+
+  private resetToNewGame(): void {
+    this.story.restore();
+    this.placePlayer({ ...PLAYER_START.position, heading: PLAYER_START.yaw });
+  }
+
+  private placePlayer(p: { x: number; z: number; heading: number }): void {
+    Object.assign(this.player, { x: p.x, z: p.z, heading: p.heading, velocityX: 0, velocityZ: 0 });
+    this.player.y = this.world.groundHeight(p.x, p.z);
+    this.cameraRig.reset(p.heading);
+    this.area = null;
+    this.toasts.clear();
+    this.notebookSeenOrder = buildNotebook(this.story, JOURNAL_SOURCES).latestOrder;
+    this.refreshNotebookBadge();
+  }
+
+  // ───────── 表示 ─────────
+
   private updateArea(): void {
     const next = resolveArea(this.area, this.player, this.world.locations);
     if (next === this.area) return;
@@ -251,7 +565,7 @@ export class Game {
   }
 
   private updateMarker(dt: number): void {
-    const target = this.interaction.target;
+    const target = this.uiMode === 'explore' ? this.interaction.target : null;
     if (!target) {
       this.marker.hide();
       return;
@@ -279,7 +593,7 @@ export class Game {
       this.dialogueBox.hide();
     }
 
-    const target = this.interaction.target;
+    const target = this.uiMode === 'explore' ? this.interaction.target : null;
     if (!target) {
       this.prompt.hide();
       return;
@@ -318,7 +632,9 @@ export class Game {
       area: this.nearestLocationLabel(),
       drawCalls: this.renderer.info.render.calls,
       target: this.interaction.partner?.label ?? this.interaction.target?.label ?? '-',
-      flags: this.story.snapshot(),
+      mode: this.uiMode,
+      flags: this.story.flagList(),
+      learned: this.story.allLearned().map((l) => `${l.topic}/${l.stage}`),
     });
   }
 

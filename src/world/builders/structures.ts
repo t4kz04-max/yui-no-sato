@@ -164,6 +164,52 @@ export function createProp(p: Palette, kind: PropKind): THREE.Object3D {
       }
       return g;
     }
+    case 'ledgerBox': {
+      // 縁先の低い台と文箱、その上の帳面（結帳）
+      const g = new THREE.Group();
+      const stand = shadowed(new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.08, 0.6), p.woodLight));
+      stand.position.y = 0.55;
+      g.add(stand);
+      const legGeo = new THREE.BoxGeometry(0.08, 0.55, 0.08);
+      for (const x of [-0.38, 0.38]) {
+        for (const z of [-0.24, 0.24]) {
+          const leg = new THREE.Mesh(legGeo, p.woodDark);
+          leg.position.set(x, 0.27, z);
+          g.add(leg);
+        }
+      }
+      const box = shadowed(new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.16, 0.36), p.woodDark));
+      box.position.set(-0.12, 0.67, 0);
+      g.add(box);
+      const book = shadowed(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 0.22), p.plaster));
+      book.position.set(0.24, 0.62, 0.05);
+      book.rotation.y = 0.2;
+      g.add(book);
+      return g;
+    }
+    case 'recordShelf': {
+      // 小さな棚と帳面（ミネ家の貸し借りの控え）
+      const g = new THREE.Group();
+      const sideGeo = new THREE.BoxGeometry(0.06, 1.3, 0.45);
+      for (const x of [-0.52, 0.52]) {
+        const side = shadowed(new THREE.Mesh(sideGeo, p.woodWeathered));
+        side.position.set(x, 0.65, 0);
+        g.add(side);
+      }
+      const shelfGeo = new THREE.BoxGeometry(1.04, 0.05, 0.45);
+      for (const y of [0.1, 0.55, 1.0, 1.3]) {
+        const shelf = new THREE.Mesh(shelfGeo, p.woodWeathered);
+        shelf.position.y = y;
+        g.add(shelf);
+      }
+      const bookGeo = new THREE.BoxGeometry(0.28, 0.06, 0.2);
+      for (let i = 0; i < 3; i++) {
+        const book = new THREE.Mesh(bookGeo, p.plaster);
+        book.position.set(-0.25 + i * 0.25, 0.6 + (i % 2) * 0.05, 0.05);
+        g.add(book);
+      }
+      return g;
+    }
     case 'rock': {
       const rock = shadowed(new THREE.Mesh(new THREE.DodecahedronGeometry(0.75, 0), p.rock));
       rock.scale.set(1, 0.6, 0.85);

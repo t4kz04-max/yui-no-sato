@@ -77,6 +77,13 @@ export class ThirdPersonCamera {
     this.camera.lookAt(this.target);
   }
 
+  /** 記録の読込・やり直しのとき、補間せずに指定の向きへ置き直す。 */
+  reset(yaw: number): void {
+    this.orbit.yaw = this.orbit.targetYaw = yaw;
+    this.initialized = false;
+    this.effectiveDistance = this.orbit.distance;
+  }
+
   /** 画面奥方向の水平角。移動入力の基準に使う。 */
   get yaw(): number {
     return this.orbit.yaw;

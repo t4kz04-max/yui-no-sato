@@ -38,7 +38,15 @@ export interface TreeDef {
   readonly scale: number;
 }
 
-export type PropKind = 'woodpile' | 'lantern' | 'kayaBundles' | 'hasaRack' | 'workbench' | 'rock';
+export type PropKind =
+  | 'woodpile'
+  | 'lantern'
+  | 'kayaBundles'
+  | 'hasaRack'
+  | 'workbench'
+  | 'rock'
+  | 'ledgerBox'
+  | 'recordShelf';
 
 export interface PropDef {
   readonly kind: PropKind;
@@ -91,6 +99,8 @@ export const PROP_FOOTPRINT: Record<PropKind, { halfWidth: number; halfDepth: nu
   hasaRack: { halfWidth: 3.2, halfDepth: 0.35 },
   workbench: { halfWidth: 1.3, halfDepth: 0.7 },
   rock: { radius: 0.7 },
+  ledgerBox: { halfWidth: 0.45, halfDepth: 0.3 },
+  recordShelf: { halfWidth: 0.55, halfDepth: 0.25 },
 };
 
 export const TREE_TRUNK_RADIUS = 0.55;
@@ -159,6 +169,10 @@ export const PROPS: readonly PropDef[] = [
   { kind: 'kayaBundles', position: { x: -29.5, z: 14.5 }, rotation: 0 },
   // 宗平の作業場：作業台（Phase 1 以降の計画台の仮置き）
   { kind: 'workbench', position: { x: 4.5, z: -21 }, rotation: 0 },
+  // サエ家の縁先の文箱（結帳）
+  { kind: 'ledgerBox', position: { x: 5.8, z: 9.75 }, rotation: 0 },
+  // ミネ家の茅置場の脇の棚（貸し借りの控え）
+  { kind: 'recordShelf', position: { x: -22.15, z: 8.5 }, rotation: Math.PI / 2 },
   // 水路沿いの石
   { kind: 'rock', position: { x: 6, z: 19.4 }, rotation: 0.4 },
   { kind: 'rock', position: { x: -8, z: 19.6 }, rotation: 1.1, scale: 0.8 },

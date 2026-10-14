@@ -1,5 +1,5 @@
 import type { Vec2 } from '../core/math';
-import type { FlagId } from '../story/conditions';
+import type { FlagId } from '../story/types';
 import type { LocationId } from '../world/layout';
 
 /**
@@ -29,6 +29,8 @@ export interface NpcInteractable extends InteractableBase {
 
 export interface ObjectInteractable extends InteractableBase {
   readonly kind: 'object';
+  /** 調べ終えたときに開く専用画面（結帳など）。 */
+  readonly opens?: 'ledger';
   /** 案内表示を出す高さ（地面から）。 */
   readonly markerHeight: number;
 }
@@ -43,4 +45,9 @@ export const ACTION_LABEL: Record<Interactable['kind'], string> = {
 /** 会話・調査を一度終えたときに自動で立つフラグ。 */
 export function completionFlag(def: Interactable): FlagId {
   return def.kind === 'npc' ? `talked:${def.id}` : `inspected:${def.id}`;
+}
+
+/** 手帳の「経緯」に出す入手元の表記。 */
+export function sourceLabel(def: Interactable): string {
+  return def.kind === 'npc' ? `${def.label}と話した` : `${def.label}を調べた`;
 }

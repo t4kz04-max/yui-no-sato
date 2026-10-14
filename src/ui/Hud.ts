@@ -10,7 +10,9 @@ export interface DebugInfo {
   readonly area: string;
   readonly drawCalls: number;
   readonly target: string;
+  readonly mode: string;
   readonly flags: readonly string[];
+  readonly learned: readonly string[];
 }
 
 export class Hud {
@@ -19,19 +21,22 @@ export class Hud {
   private readonly objectiveEl: HTMLElement;
   private readonly objectiveTextEl: HTMLElement;
   private readonly areaEl: HTMLElement;
+  private readonly notebookBadgeEl: HTMLElement;
   private debugVisible = false;
   private areaTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(private readonly root: HTMLElement) {
     root.innerHTML = '';
     const title = el('div', 'hud-title');
-    title.innerHTML = '<span class="hud-title-main">結の約束</span><span class="hud-title-sub">（仮）開発版 Phase 1</span>';
+    title.innerHTML = '<span class="hud-title-main">結の約束</span><span class="hud-title-sub">（仮）開発版 Phase 2</span>';
 
     this.helpEl = el('div', 'hud-help');
     this.helpEl.innerHTML = [
       ['W A S D', '移動'],
       ['Shift', '走る'],
       ['E', '話す・調べる'],
+      ['Tab', '手帳'],
+      ['Esc', 'ポーズ／会話をやめる'],
       ['ドラッグ', '視点'],
       ['ホイール', 'ズーム'],
       ['H', '操作説明'],
@@ -47,13 +52,17 @@ export class Hud {
     this.objectiveEl.append(objectiveLabel, this.objectiveTextEl);
     this.objectiveEl.hidden = true;
 
+    this.notebookBadgeEl = el('div', 'hud-notebook-badge');
+    this.notebookBadgeEl.textContent = '手帳に新しい記録［Tab］';
+    this.notebookBadgeEl.hidden = true;
+
     this.areaEl = el('div', 'hud-area');
     this.areaEl.hidden = true;
 
     this.debugEl = el('div', 'hud-debug');
     this.debugEl.hidden = true;
 
-    root.append(title, this.objectiveEl, this.areaEl, this.helpEl, this.debugEl);
+    root.append(title, this.objectiveEl, this.notebookBadgeEl, this.areaEl, this.helpEl, this.debugEl);
   }
 
   toggleDebug(): void {
@@ -72,6 +81,15 @@ export class Hud {
   /** 会話中は探索用の表示を控えめにする。 */
   setDialogueMode(active: boolean): void {
     this.root.classList.toggle('is-dialogue', active);
+  }
+
+  /** 手帳・結帳・ポーズなどの画面を開いている間は、探索用の表示を隠す。 */
+  setOverlayMode(active: boolean): void {
+    this.root.classList.toggle('is-overlay', active);
+  }
+
+  setNotebookBadge(visible: boolean): void {
+    this.notebookBadgeEl.hidden = !visible;
   }
 
   setObjective(text: string): void {

@@ -1,5 +1,5 @@
 import { evaluate } from '../story/conditions';
-import type { StoryState } from '../story/StoryState';
+import type { EffectContext, StoryState } from '../story/StoryState';
 import type { DialogueChoice, DialogueNode, DialogueScript, NodeId, SpeakerId } from './types';
 
 export interface DialogueChoiceView {
@@ -31,6 +31,8 @@ export class DialogueRunner {
   constructor(
     readonly script: DialogueScript,
     private readonly state: StoryState,
+    /** 効果を適用するときの文脈（手帳の「経緯」に出す入手元）。 */
+    private readonly ctx: EffectContext = {},
   ) {
     const entry = script.entries.find((e) => evaluate(e.when, state));
     if (!entry) throw new Error(`会話 ${script.id} に成立する入口がありません`);
@@ -75,7 +77,7 @@ export class DialogueRunner {
     if (!node || this.page !== node.lines.length - 1) return false;
     const choice = this.choices[index];
     if (!choice) return false;
-    this.state.apply(choice.effects);
+    this.state.apply(choice.effects, this.ctx);
     this.go(choice.next);
     return true;
   }
@@ -98,7 +100,7 @@ export class DialogueRunner {
     if (!node) throw new Error(`会話 ${this.script.id} に場面 ${id} がありません`);
     this.nodeId = id;
     this.page = 0;
-    this.state.apply(node.effects);
+    this.state.apply(node.effects, this.ctx);
     // 効果を適用した後の状態で、表示する選択肢を決める。
     // 1つも表示できない場合は送りで会話を終える（行き止まりにしない。データ検証でも防ぐ）。
     this.choices = (node.choices ?? []).filter((c) => evaluate(c.when, this.state));
