@@ -437,18 +437,13 @@ export interface OutcomeDef {
 
 /** 屋根葺き当日、サエ家の前に来ている人の立ち位置。 */
 export const ON_SITE: Readonly<Record<string, Placement>> = {
-  sohei: { position: { x: -4.8, z: 10.6 }, heading: 0.3 },
+  // 段取り：梯子と屋根の方（北西）を向いて指示する
+  sohei: { position: { x: -4.8, z: 10.6 }, heading: Math.PI + 0.35 },
   isuke: { position: { x: -2.9, z: 12.0 }, heading: 1.79 },
   mine: { position: { x: 8.2, z: 10.2 }, heading: -Math.PI / 2 },
 };
 
-/** 屋根葺き当日に手伝いに来ている村の人たち（名前のない人物。飾り）。 */
-export const VILLAGERS: readonly Placement[] = [
-  { position: { x: -7.6, z: 7.2 }, heading: Math.PI / 2 },
-  { position: { x: -7.6, z: -1.5 }, heading: Math.PI / 2 },
-  { position: { x: 7.6, z: 3.0 }, heading: -Math.PI / 2 },
-  { position: { x: 7.6, z: 6.5 }, heading: -Math.PI / 2 },
-];
+// 屋根葺き当日に手伝いに来ている名前のない村の人たちは、Phase 5 で content/staging.ts に移した（役割・人数が計画で変わる）。
 
 const FAMILY: Record<OutcomeFamily, { title: string; tagline: string; when: string }> = {
   solo: { title: '予定どおり、伊助に頼まずに', tagline: '予定日に、伊助に頼まず葺く', when: '屋根葺きの日' },

@@ -115,7 +115,7 @@ export const INTERACTABLES: readonly Interactable[] = [
     dialogue: 'ledger',
     location: 'saeHouse',
     // サエ家の縁先の文箱（world/layout.ts の ledgerBox）
-    position: { x: 5.8, z: 10.45 },
+    position: { x: 5.8, z: 7.95 },
     range: 2.4,
     markerHeight: 1.4,
     opens: 'ledger',

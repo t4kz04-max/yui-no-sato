@@ -32,7 +32,11 @@ import { CONSENT_LABEL } from '../story/types';
 import { InteractionSystem } from '../interaction/InteractionSystem';
 import { InteractionMarker } from '../interaction/InteractionMarker';
 import { ACTION_LABEL, type Interactable } from '../interaction/types';
-import { CHARACTERS, type CharacterId } from '../content/characters';
+import { CHARACTERS, VILLAGER_LOOKS, type CharacterId } from '../content/characters';
+import { npcStyle, roofDayStage, roofStates } from '../content/staging';
+import { RoofDayScene } from '../world/RoofDayScene';
+import { southSideOf } from '../world/World';
+import { BUILDINGS } from '../world/layout';
 import { DIALOGUES } from '../content/dialogues';
 import { INTERACTABLES, NPCS, npcColliders } from '../content/interactables';
 import { currentObjective } from '../content/objectives';
@@ -40,7 +44,6 @@ import { HOUSEHOLDS, STORY_DEFS } from '../content/story';
 import { LEDGER_NOTE, LEDGER_TITLE } from '../content/ledger';
 import { buildLedger, buildNotebook, type JournalSources } from '../journal/models';
 import { buildOutcome, buildPlanBoard, describePlan, shownLines, type PlanSources } from '../journal/planModels';
-import { createPersonRig, type PersonAppearance } from '../characters/personRig';
 import {
   ENDINGS,
   INITIAL_PLAN3,
@@ -58,7 +61,6 @@ import {
   PLANNING_AVAILABLE,
   RELEVANT_TOPICS,
   RESPONSE_SUMMARY,
-  VILLAGERS,
   forecastPlan,
 } from '../content/plan';
 import { evaluate, knows } from '../story/conditions';
@@ -95,13 +97,6 @@ const PLAN_SOURCES: PlanSources = {
     },
   },
 };
-/** 屋根葺き当日に手伝いに来る村の人たちの見た目（名前のない人物）。 */
-const VILLAGER_LOOKS: readonly PersonAppearance[] = [
-  { cloth: 0x5a6b4a, limb: 0x2f3626, skin: 0xe6c3a2, hair: 0x1a1a1a, headwear: 'kerchief', headwearColor: 0xd8d0c0 },
-  { cloth: 0x6b4a3a, limb: 0x3a2a20, skin: 0xe2b896, hair: 0x2a2018, headwear: 'straw' },
-  { cloth: 0x45546a, limb: 0x252f3c, skin: 0xf0cfb0, hair: 0x1f1a17, headwear: 'none' },
-  { cloth: 0x7a6a48, limb: 0x3a3424, skin: 0xe6c3a2, hair: 0x5a554e, headwear: 'kerchief', headwearColor: 0x9a8a6a },
-];
 const NOTEBOOK_TAB_KEYS: ReadonlyArray<[string, NotebookTab]> = [
   ['Digit1', 'people'],
   ['Digit2', 'known'],
@@ -141,8 +136,8 @@ export class Game {
   private readonly resultView: ResultView;
   private readonly endingView: EndingView;
   private readonly explainView: ExplainView;
-  /** 屋根葺き当日に手伝いに来る村の人たち。 */
-  private readonly villagers = new THREE.Group();
+  /** 屋根葺きの日の作業の場（足場・茅の山・手伝いに来た村の人たち）。 */
+  private readonly roofDay: RoofDayScene;
   /** 会話が終わったら、屋根葺きの日を終えて結果画面を出す。 */
   private endDayAfterDialogue = false;
   private readonly pauseMenu: MenuPanel;
@@ -197,23 +192,34 @@ export class Game {
     this.renderer = createRenderer(canvasRoot);
     this.disposers.push(bindResize(canvasRoot, this.renderer, this.camera));
 
-    setupLighting(this.scene);
-    this.world = new World(npcColliders());
+    const lighting = setupLighting(this.scene);
+    this.world = new World({
+      npcColliders: npcColliders(),
+      horizon: lighting.horizon,
+      sunDirection: lighting.sunDirection,
+      keepClear: INTERACTABLES.map((i) => i.position),
+    });
     this.scene.add(this.world.root);
     this.scene.add(this.playerView.root);
     this.scene.add(this.marker.root);
-    VILLAGERS.forEach((v, i) => {
-      const rig = createPersonRig(VILLAGER_LOOKS[i % VILLAGER_LOOKS.length]!);
-      rig.root.position.set(v.position.x, this.world.groundHeight(v.position.x, v.position.z), v.position.z);
-      rig.root.rotation.y = v.heading;
-      rig.rightArm.rotation.x = -0.6;
-      this.villagers.add(rig.root);
-    });
-    this.villagers.visible = false;
-    this.scene.add(this.villagers);
+    const saeDef = BUILDINGS.find((b) => b.id === 'sae')!;
+    this.roofDay = new RoofDayScene(
+      this.world.palette,
+      this.world.buildingRoots.get('sae')!,
+      this.world.roofOf('sae')!,
+      southSideOf(saeDef.rotation),
+      VILLAGER_LOOKS,
+      (x, z) => this.world.groundHeight(x, z),
+    );
+    this.scene.add(this.roofDay.root);
     for (const npc of NPCS) {
       const character = CHARACTERS[npc.character as CharacterId];
-      const view = new NpcView(npc, character.appearance, this.world.groundHeight(npc.position.x, npc.position.z));
+      const view = new NpcView(
+        npc,
+        character.appearance,
+        this.world.groundHeight(npc.position.x, npc.position.z),
+        character.idle,
+      );
       this.npcViews.set(npc.id, view);
       this.scene.add(view.root);
     }
@@ -417,6 +423,8 @@ export class Game {
       const talking = partner?.id === id;
       view.update(dt, talking ? this.player : null, talking && this.dialogueBox.isRevealing);
     }
+    // 屋根葺きの日：茅を運ぶ人が動いたら、当たり判定を付け直す
+    if (this.roofDay.update(dt, this.player)) this.world.setExtraColliders(this.roofDay.colliders());
     this.cameraRig.update(this.cameraFocus(partner), this.input.consumeOrbitInput(), dt);
     this.updateMarker(dt);
 
@@ -632,33 +640,31 @@ export class Game {
   }
 
   /**
-   * 決めた計画の結果を村の様子に反映する（屋根の色・はさ掛け・住民の立ち位置と当たり判定）。
-   * 決定前・やり直しのときは元の様子に戻す。
+   * 決めた計画の結果を村の様子に反映する（屋根の見た目・はさ掛け・住民の立ち位置と立ち姿・
+   * 屋根葺きの日の作業の場・当たり判定）。決定前・やり直しのときは元の様子に戻す。
+   * 何をどう見せるかは content/staging.ts の純粋関数で決め、ここでは当てはめるだけにする。
    */
   private applyChapterToWorld(): void {
     const chapter = this.story.chapter;
     const roof = this.story.planDecision('roof');
     const isukeRoof = this.story.planDecision('isukeRoof');
     const def = chapter === 'roofDay' && roof ? OUTCOMES[roof.outcome] : undefined;
-    const saeStage = this.story.currentStage('sae.roof');
-    const saeDone = chapter === 'ch3' || chapter === 'end';
-    this.world.setRoofState('sae', saeDone ? (saeStage === 'renewed' ? 'renewed' : 'partial') : 'old');
-    this.world.setRoofState(
-      'isuke',
-      chapter === 'ch3' ? 'worn' : chapter === 'end' ? (isukeRoof?.outcome === 'e3' ? 'worn' : 'renewed') : 'old',
-    );
+    const roofs = roofStates(chapter, roof?.outcome, isukeRoof?.outcome);
+    this.world.setRoofState('sae', roofs.sae);
+    this.world.setRoofState('isuke', roofs.isuke);
     this.world.setHarvestDone(def?.harvestDone ?? false);
-    this.villagers.visible = chapter === 'roofDay';
+    this.roofDay.show(chapter === 'roofDay' && roof ? roofDayStage(roof.outcome) : null);
     for (const npc of NPCS) {
       const placement = def?.placements[npc.character] ?? null;
       this.interaction.setPlacement(npc.id, placement);
       const p = placement ?? { position: npc.position, heading: npc.heading };
-      this.npcViews.get(npc.id)?.setHome(p.position.x, p.position.z, p.heading, this.world.groundHeight(p.position.x, p.position.z));
+      const view = this.npcViews.get(npc.id);
+      view?.setHome(p.position.x, p.position.z, p.heading, this.world.groundHeight(p.position.x, p.position.z));
+      const character = npc.character as CharacterId;
+      view?.setStyle(npcStyle(character, CHARACTERS[character].idle, chapter, roof?.outcome));
     }
-    const villagerColliders = this.villagers.visible
-      ? VILLAGERS.map((v) => ({ kind: 'circle' as const, x: v.position.x, z: v.position.z, radius: 0.4 }))
-      : [];
-    this.world.setNpcColliders([...npcColliders(this.interaction.interactables.filter((i) => i.kind === 'npc')), ...villagerColliders]);
+    this.world.setNpcColliders(npcColliders(this.interaction.interactables.filter((i) => i.kind === 'npc')));
+    this.world.setExtraColliders(this.roofDay.colliders());
   }
 
   /** 章が変わったときなど、決まった場所にプレイヤーを置き直す。 */

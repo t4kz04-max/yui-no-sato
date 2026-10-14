@@ -18,7 +18,20 @@ export interface LocationDef {
   readonly position: Vec2;
 }
 
-export type BuildingKind = 'gassho' | 'workshop' | 'kayaShed';
+export type BuildingKind = 'gassho' | 'workshop' | 'kayaShed' | 'toolShed';
+
+/** 合掌造りの家ごとの違い（docs/PHASE5_ART.md §1）。南を向く屋根の面は rotation から決まる。 */
+export interface GasshoVariant {
+  /** 妻面の窓の段数。 */
+  readonly windowRows: 2 | 3 | 4;
+  /** 入口：妻側か、南を向いた長い辺か。 */
+  readonly entrance: 'gable' | 'side';
+  readonly engawa?: boolean;
+  /** 壁に立てかけた茅の束。 */
+  readonly leanKaya?: boolean;
+  /** 南面の傷みのひどい所（棟方向の割合 zFrom〜zTo、軒先からの割合 uTo）。 */
+  readonly damage?: { readonly zFrom: number; readonly zTo: number; readonly uTo: number };
+}
 
 export interface BuildingDef {
   readonly id: string;
@@ -28,6 +41,7 @@ export interface BuildingDef {
   readonly rotation: number;
   readonly scale: number;
   readonly location?: LocationId;
+  readonly variant?: GasshoVariant;
 }
 
 export type TreeKind = 'cedar' | 'maple' | 'broadleaf';
@@ -46,13 +60,20 @@ export type PropKind =
   | 'workbench'
   | 'rock'
   | 'ledgerBox'
-  | 'recordShelf';
+  | 'recordShelf'
+  | 'tub'
+  | 'basket'
+  | 'toolRack'
+  | 'ladderRack'
+  | 'ropeCoil';
 
 export interface PropDef {
   readonly kind: PropKind;
   readonly position: Vec2;
   readonly rotation: number;
   readonly scale?: number;
+  /** 'isukeHarvest'：伊助家のはさ掛け（刈り入れが済むと稲が増える）。 */
+  readonly tag?: string;
 }
 
 export interface FieldDef {
@@ -90,6 +111,7 @@ export const BUILDING_FOOTPRINT: Record<BuildingKind, { halfWidth: number; halfD
   gassho: { halfWidth: 5.5, halfDepth: 7.5 },
   workshop: { halfWidth: 4.2, halfDepth: 3.2 },
   kayaShed: { halfWidth: 3.2, halfDepth: 2.2 },
+  toolShed: { halfWidth: 2.2, halfDepth: 1.6 },
 };
 
 export const PROP_FOOTPRINT: Record<PropKind, { halfWidth: number; halfDepth: number } | { radius: number } | null> = {
@@ -101,6 +123,11 @@ export const PROP_FOOTPRINT: Record<PropKind, { halfWidth: number; halfDepth: nu
   rock: { radius: 0.7 },
   ledgerBox: { halfWidth: 0.45, halfDepth: 0.3 },
   recordShelf: { halfWidth: 0.55, halfDepth: 0.25 },
+  tub: { radius: 0.45 },
+  basket: { radius: 0.35 },
+  toolRack: { halfWidth: 0.9, halfDepth: 0.3 },
+  ladderRack: { halfWidth: 1.6, halfDepth: 0.35 },
+  ropeCoil: { radius: 0.4 },
 };
 
 export const TREE_TRUNK_RADIUS = 0.55;
@@ -114,21 +141,58 @@ export const LOCATIONS: readonly LocationDef[] = [
 ];
 
 export const BUILDINGS: readonly BuildingDef[] = [
-  // 中央：屋根葺き予定の大きな合掌造り（ランドマーク）
-  { id: 'sae', kind: 'gassho', position: { x: 0, z: 0 }, rotation: 0, scale: 1.2, location: 'saeHouse' },
+  // 中央：屋根葺き予定の大きな合掌造り（ランドマーク）。
+  // 棟を東西に通し、屋根の南面が広場を向く（物語の「南面を葺き替える」と見た目を合わせる。Phase 5）。
+  // 入口は南の長い辺。傷みのひどい所は南面の西側（「サエ家の屋根」を調べる場所の上）。
+  {
+    id: 'sae',
+    kind: 'gassho',
+    position: { x: 0, z: 0 },
+    rotation: Math.PI / 2,
+    scale: 1.2,
+    location: 'saeHouse',
+    variant: { windowRows: 4, entrance: 'side', engawa: true, damage: { zFrom: 0.14, zTo: 0.46, uTo: 0.62 } },
+  },
   // 東：伊助家（正面を村の中心＝西へ向ける）
-  { id: 'isuke', kind: 'gassho', position: { x: 24, z: -6 }, rotation: -Math.PI / 2, scale: 1.0, location: 'isukeHouse' },
+  {
+    id: 'isuke',
+    kind: 'gassho',
+    position: { x: 24, z: -6 },
+    rotation: -Math.PI / 2,
+    scale: 1.0,
+    location: 'isukeHouse',
+    variant: { windowRows: 3, entrance: 'gable' },
+  },
+  { id: 'isukeShed', kind: 'toolShed', position: { x: 29.5, z: -15.2 }, rotation: Math.PI, scale: 1.0, location: 'isukeHouse' },
   // 西：ミネ家（正面を東へ向ける）
-  { id: 'mine', kind: 'gassho', position: { x: -24, z: -6 }, rotation: Math.PI / 2, scale: 1.0, location: 'mineHouse' },
+  {
+    id: 'mine',
+    kind: 'gassho',
+    position: { x: -24, z: -6 },
+    rotation: Math.PI / 2,
+    scale: 1.0,
+    location: 'mineHouse',
+    variant: { windowRows: 3, entrance: 'gable', leanKaya: true },
+  },
   { id: 'mineKayaShed', kind: 'kayaShed', position: { x: -25, z: 10 }, rotation: Math.PI / 2, scale: 1.0, location: 'mineHouse' },
   // 北：宗平の作業場
   { id: 'sohei', kind: 'workshop', position: { x: 0, z: -27 }, rotation: 0, scale: 1.0, location: 'soheiWorkshop' },
-  // 背景の家々
-  { id: 'bgNorthWest', kind: 'gassho', position: { x: -25, z: -33 }, rotation: 0.3, scale: 0.9 },
-  { id: 'bgNorthEast', kind: 'gassho', position: { x: 25, z: -33 }, rotation: -0.25, scale: 0.95 },
+  // 背景の家々（村の広がり）。南の 2 軒は歩ける範囲の外（水路の南の田んぼの向こう）
+  { id: 'bgNorthWest', kind: 'gassho', position: { x: -25, z: -33 }, rotation: 0.3, scale: 0.9, variant: { windowRows: 3, entrance: 'gable' } },
+  { id: 'bgNorthEast', kind: 'gassho', position: { x: 25, z: -33 }, rotation: -0.25, scale: 0.95, variant: { windowRows: 3, entrance: 'gable' } },
+  { id: 'bgSouthWest', kind: 'gassho', position: { x: -31, z: 47.5 }, rotation: Math.PI * 0.94, scale: 0.8, variant: { windowRows: 2, entrance: 'gable' } },
+  { id: 'bgSouthEast', kind: 'gassho', position: { x: 33, z: 48 }, rotation: -Math.PI * 0.92, scale: 0.85, variant: { windowRows: 3, entrance: 'gable' } },
 ];
 
 export const FIELD: FieldDef = { position: { x: 40, z: -4 }, halfWidth: 5.5, halfDepth: 10 };
+
+/** 水路の南の田んぼ（刈り取りの済んだ田。見た目だけで、歩いて入れる）。 */
+export const PADDIES: readonly FieldDef[] = [
+  { position: { x: 9.2, z: 31.6 }, halfWidth: 5.0, halfDepth: 4.4 },
+  { position: { x: 20.2, z: 31.4 }, halfWidth: 5.2, halfDepth: 4.6 },
+  { position: { x: -9.6, z: 31.6 }, halfWidth: 5.4, halfDepth: 4.4 },
+  { position: { x: -21.4, z: 31.8 }, halfWidth: 5.2, halfDepth: 4.6 },
+];
 
 export const WATERWAY: WaterwayDef = { centerZ: 23, halfWidth: 2.1, minX: -70, maxX: 70, waterLevel: -0.45 };
 
@@ -137,8 +201,8 @@ export const BRIDGE: BridgeDef = { x: 0, halfWidth: 1.4, startZ: 19.8, endZ: 26.
 export const PATHS: readonly PathDef[] = [
   // 南の入口 → 橋
   { points: [{ x: 0, z: 40 }, { x: 0, z: 26 }], width: 3 },
-  // 橋 → 広場 → サエ家の玄関
-  { points: [{ x: 0, z: 20 }, { x: 0, z: 9.5 }], width: 3.2 },
+  // 橋 → 広場 → サエ家の入口（南の長い辺）
+  { points: [{ x: 0, z: 20 }, { x: 0, z: 7.8 }], width: 3.2 },
   // 広場 → 東（伊助家）
   { points: [{ x: 2, z: 15 }, { x: 10, z: 12 }, { x: 13.5, z: 4 }, { x: 15.5, z: -6 }], width: 2.4 },
   // 広場 → 西（ミネ家・茅置場）
@@ -156,27 +220,42 @@ export const PROPS: readonly PropDef[] = [
   // 広場の石灯籠
   { kind: 'lantern', position: { x: 3.4, z: 13 }, rotation: 0 },
   { kind: 'lantern', position: { x: -3.4, z: 13 }, rotation: 0 },
-  // 軒下の薪
-  { kind: 'woodpile', position: { x: -7.2, z: 4 }, rotation: Math.PI / 2 },
-  { kind: 'woodpile', position: { x: 7.2, z: -5 }, rotation: Math.PI / 2 },
+  // 軒下の薪（サエ家は北側の軒下）
+  { kind: 'woodpile', position: { x: -4.5, z: -7.45 }, rotation: 0 },
+  { kind: 'woodpile', position: { x: 3.5, z: -7.45 }, rotation: 0 },
   { kind: 'woodpile', position: { x: 26, z: 3.2 }, rotation: 0 },
   { kind: 'woodpile', position: { x: -26, z: -15.2 }, rotation: 0 },
   // 伊助家の畑：はさ掛け（収穫期の忙しさを環境で示す）
-  { kind: 'hasaRack', position: { x: 40, z: 8.6 }, rotation: 0 },
-  { kind: 'hasaRack', position: { x: 40, z: -16.6 }, rotation: 0, scale: 0.8 },
+  { kind: 'hasaRack', position: { x: 40, z: 8.6 }, rotation: 0, tag: 'isukeHarvest' },
+  { kind: 'hasaRack', position: { x: 40, z: -16.6 }, rotation: 0, scale: 0.8, tag: 'isukeHarvest' },
+  // 水路の南の田んぼのはさ掛け
+  { kind: 'hasaRack', position: { x: 9.2, z: 34.6 }, rotation: 0, scale: 0.9 },
+  { kind: 'hasaRack', position: { x: -21.4, z: 34.8 }, rotation: 0, scale: 0.9 },
   // ミネ家の茅置場：束ねた茅
   { kind: 'kayaBundles', position: { x: -20.5, z: 14.5 }, rotation: 0 },
   { kind: 'kayaBundles', position: { x: -29.5, z: 14.5 }, rotation: 0 },
   // 宗平の作業場：作業台（Phase 1 以降の計画台の仮置き）
   { kind: 'workbench', position: { x: 4.5, z: -21 }, rotation: 0 },
   // サエ家の縁先の文箱（結帳）
-  { kind: 'ledgerBox', position: { x: 5.8, z: 9.75 }, rotation: 0 },
+  { kind: 'ledgerBox', position: { x: 5.8, z: 7.25 }, rotation: 0 },
   // ミネ家の茅置場の脇の棚（貸し借りの控え）
   { kind: 'recordShelf', position: { x: -22.15, z: 8.5 }, rotation: Math.PI / 2 },
   // 水路沿いの石
   { kind: 'rock', position: { x: 6, z: 19.4 }, rotation: 0.4 },
   { kind: 'rock', position: { x: -8, z: 19.6 }, rotation: 1.1, scale: 0.8 },
-  { kind: 'rock', position: { x: 15, z: 27 }, rotation: 2.2, scale: 1.1 },
+  { kind: 'rock', position: { x: 14, z: 26.4 }, rotation: 2.2, scale: 1.1 },
+  // 暮らしの道具（壁際・道から離れた所に置く）
+  { kind: 'tub', position: { x: -7.6, z: 7.6 }, rotation: 0 },
+  { kind: 'basket', position: { x: 8.9, z: 7.3 }, rotation: 0.4 },
+  { kind: 'toolRack', position: { x: 26.8, z: -12.4 }, rotation: 0 },
+  { kind: 'basket', position: { x: 32.6, z: -1.2 }, rotation: 1.2 },
+  { kind: 'tub', position: { x: 17.6, z: -12.4 }, rotation: 0 },
+  { kind: 'tub', position: { x: -17.4, z: -12.6 }, rotation: 0 },
+  { kind: 'basket', position: { x: -30.6, z: 1.0 }, rotation: 2.1 },
+  // 宗平の作業場：梯子・縄（屋根葺きの道具）
+  { kind: 'ladderRack', position: { x: -2.6, z: -31.0 }, rotation: Math.PI },
+  { kind: 'ropeCoil', position: { x: 6.2, z: -24.6 }, rotation: 0 },
+  { kind: 'toolRack', position: { x: -5.6, z: -27 }, rotation: Math.PI / 2 },
 ];
 
 export const PLAYER_START = { position: { x: 0, z: 31 }, yaw: Math.PI } as const;
@@ -196,8 +275,8 @@ function buildTrees(): TreeDef[] {
     { kind: 'maple', position: { x: 10, z: -27 }, scale: 0.9 },
     { kind: 'cedar', position: { x: -34, z: 2 }, scale: 1.2 },
     { kind: 'broadleaf', position: { x: 33, z: 15 }, scale: 1.0 },
-    { kind: 'maple', position: { x: -16, z: 30 }, scale: 1.1 },
-    { kind: 'cedar', position: { x: 20, z: 33 }, scale: 1.0 },
+    { kind: 'maple', position: { x: -16.2, z: 38.6 }, scale: 1.1 },
+    { kind: 'cedar', position: { x: 28.4, z: 37.6 }, scale: 1.0 },
   ];
 
   const rand = createRandom(20261114);
@@ -223,8 +302,8 @@ function buildTrees(): TreeDef[] {
 /** 建物・畑・水路・道の上には外周の木を生やさない。 */
 function isReservedForTree(x: number, z: number): boolean {
   if (Math.abs(z - WATERWAY.centerZ) < WATERWAY.halfWidth + 2.5) return true;
-  if (Math.abs(x - FIELD.position.x) < FIELD.halfWidth + 3 && Math.abs(z - FIELD.position.z) < FIELD.halfDepth + 3) {
-    return true;
+  for (const f of [FIELD, ...PADDIES]) {
+    if (Math.abs(x - f.position.x) < f.halfWidth + 3 && Math.abs(z - f.position.z) < f.halfDepth + 3) return true;
   }
   for (const b of BUILDINGS) {
     const fp = BUILDING_FOOTPRINT[b.kind];
@@ -249,27 +328,20 @@ export function distanceToSegment(x: number, z: number, a: Vec2, b: Vec2): numbe
   return Math.hypot(x - (a.x + abx * t), z - (a.z + abz * t));
 }
 
-/** 遠景の山。描画のみ。 */
-export interface MountainDef {
-  readonly position: Vec2;
-  readonly radius: number;
+/** 遠景の山並み（描画のみ）。手前から奥へ、輪郭の違う尾根を重ねる。 */
+export interface MountainRangeDef {
+  /** 村の中心からの距離。 */
+  readonly distance: number;
+  /** 尾根の高さの基準と揺らぎ。 */
   readonly height: number;
+  readonly variation: number;
+  /** 空の色に近づける割合（遠いほど大きい）。 */
+  readonly haze: number;
+  readonly seed: number;
 }
 
-export const MOUNTAINS: readonly MountainDef[] = buildMountains();
-
-function buildMountains(): MountainDef[] {
-  const rand = createRandom(1995);
-  const result: MountainDef[] = [];
-  const count = 16;
-  for (let i = 0; i < count; i++) {
-    const angle = (i / count) * Math.PI * 2 + rand() * 0.2;
-    const dist = 150 + rand() * 40;
-    result.push({
-      position: { x: Math.cos(angle) * dist, z: Math.sin(angle) * dist },
-      radius: 55 + rand() * 30,
-      height: 45 + rand() * 35,
-    });
-  }
-  return result;
-}
+export const MOUNTAIN_RANGES: readonly MountainRangeDef[] = [
+  { distance: 160, height: 30, variation: 20, haze: 0.12, seed: 3 },
+  { distance: 230, height: 55, variation: 32, haze: 0.3, seed: 7 },
+  { distance: 310, height: 90, variation: 44, haze: 0.5, seed: 11 },
+];

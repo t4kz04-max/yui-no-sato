@@ -3,6 +3,7 @@
  * - Phase 0：起動・移動・衝突・カメラ・ズーム・リサイズ・コンソールエラー
  * - Phase 1（[P1]）：案内表示、会話の開始・送り・選択・終了、会話中の操作制御、調査、状態による選択肢の変化
  * - Phase 2（[P2]）：手帳、結帳、ポーズ、会話の中断、記録（保存・続きから・壊れた記録・やり直し）
+ * - Phase 5（[P5]）：住民の待機の型、5 地点、すべての住民・調べられる物の操作、屋根葺きの日（計画ごとの人・役割・茅の山・足場、運ぶ人の動きと立ち止まり）、第3幕の見た目（杖・屋根）、記録の復元、描画呼び出し数
  * - Phase 4（[P4]）：宗平・ミネを含む作業台（項目の出し分け）、相談と見直し、屋根葺き当日、三年後、第3幕（Q1〜Q3）、エンディング、史実と創作の解説、記録の復元、各画面の大きさ（1280x720・1024x640）
  *
  *   npm run test:browser
@@ -92,8 +93,15 @@ check("W で北（-Z）へ進み、橋を渡れる", s1.z < 18, `z ${s0.z.toFixe
 check("橋の上で床面の高さに立つ", maxBridgeY > 0.3, `最大 y=${maxBridgeY.toFixed(2)}`);
 
 // サエ家に向かって歩き続ける → 衝突で止まる
-const s2 = await holdUntil(["KeyW"], () => false, 8000);
-check("サエ家（中央）をすり抜けない", s2.z > 9.0 + 0.34 && s2.z < 9.6, `z=${s2.z.toFixed(3)}（壁面 z=9.0、半径 0.35）`);
+// （ソフトウェア描画では歩みが遅いので、決まった時間ではなく「止まって 1.5 秒動かない」まで押し続ける）
+let lastZ = Infinity;
+let stillSince = Date.now();
+const s2 = await holdUntil(["KeyW"], (s) => {
+  if (Math.abs(s.z - lastZ) > 0.01) { lastZ = s.z; stillSince = Date.now(); }
+  return Date.now() - stillSince > 1500;
+}, 25000);
+// Phase 5 でサエ家の棟を東西に回したので、南の壁面は z=6.6
+check("サエ家（中央）をすり抜けない", s2.z > 6.6 + 0.34 && s2.z < 7.2, `z=${s2.z.toFixed(3)}（壁面 z=6.6、半径 0.35）`);
 await page.screenshot({ path: `${OUT}/shot-02-sae-front.png` });
 
 // Shift + D で東へ（壁沿いに滑って）移動
@@ -141,8 +149,8 @@ const camInHouse = await page.evaluate(() => {
   const c = window.__yui.camera.position;
   return { x: c.x, y: c.y, z: c.z };
 });
-// サエ家の躯体：x ±6, z ±8.4, 高さ ~5.8（scale 1.2）。屋根は更に上
-const insideBody = Math.abs(camInHouse.x) < 6 && Math.abs(camInHouse.z) < 8.4 && camInHouse.y < 5.8;
+// サエ家の躯体（Phase 5 で棟を東西に回した）：x ±8.4, z ±6, 高さ ~6.2（scale 1.2）。屋根は更に上
+const insideBody = Math.abs(camInHouse.x) < 8.4 && Math.abs(camInHouse.z) < 6 && camInHouse.y < 6.2;
 check('カメラが建物の中に入り込まない', !insideBody, JSON.stringify(camInHouse));
 await page.screenshot({ path: `${OUT}/shot-03-camera-collision.png` });
 await page.evaluate(() => { const o = window.__yui.cameraRig.orbit; o.targetYaw = Math.PI; o.targetPitch = 0.42; o.targetDistance = 10; });
@@ -411,7 +419,7 @@ check('[P2] 中断しても会ったことと得た情報は残り、「最後�
   c1.met.includes('sae') && c1.learned.includes('sae.schedule/needsHelp') && !c1.flags.includes('talked:sae'), c1.learned.join(','));
 
 // 結帳
-await place(5.8, 12.0, Math.PI);
+await place(5.8, 9.6, Math.PI);
 await waitFor((u) => u.target === 'ledger');
 await press('KeyE', (u) => u.dialogueVisible);
 const l0 = await finishDialogue();
@@ -508,7 +516,8 @@ const p4 = () =>
     const g = window.__yui;
     const q = (s) => document.querySelector(s);
     const vis = (s) => { const e = q(s); return !!e && !e.hidden; };
-    const roof = (id) => g.world.roofs.get(id)?.materials[1]?.color.getHex() ?? null;
+    // Phase 5：屋根の見た目は状態（old / renewed / partial / worn）で表す
+    const roof = (id) => g.world.roofState(id) ?? null;
     return {
       mode: g.mode,
       chapter: g.story.chapter,
@@ -529,7 +538,7 @@ const p4 = () =>
       notice: vis('.notice-layer'),
       noticeTitle: q('.notice-layer .menu-title')?.textContent ?? '',
       objective: q('.hud-objective-text')?.textContent ?? '',
-      villagers: g.villagers.visible,
+      villagers: g.roofDay.root.visible && g.roofDay.current !== null,
       saeRoof: roof('sae'),
       isukeRoof: roof('isuke'),
       where: Object.fromEntries(g.interaction.interactables.filter((i) => i.kind === 'npc').map((i) => [i.id, [i.position.x, i.position.z]])),
@@ -720,7 +729,7 @@ for (const [w, h] of [[1280, 720], [1024, 640]]) {
   const q4nb = await layout('.notebook', '.notebook-item-summary', '.notebook-body');
   check(`[P4] ${q4tag} 手帳：画面に収まり、要点は18px以上`, fits(q4nb, 18), JSON.stringify(q4nb));
   await press2('Tab', (s) => !s.notebook);
-  await place(5.8, 12.0, Math.PI);
+  await place(5.8, 9.6, Math.PI);
   await waitFor((u) => u.target === 'ledger');
   await press('KeyE', (u) => u.dialogueVisible);
   await finishDialogue();
@@ -745,6 +754,243 @@ for (const [w, h] of [[1280, 720], [1024, 640]]) {
 }
 await page.setViewport({ width: 1280, height: 720 });
 await wait(600);
+
+// ───────── Phase 5：3D の見た目（建物・人物・屋根葺きの日）と、操作が壊れていないこと ─────────
+await page.evaluate(() => localStorage.clear());
+await page.reload({ waitUntil: 'networkidle0' });
+await wait(2500);
+await page.mouse.click(640, 360);
+
+const p5 = () =>
+  page.evaluate(() => {
+    const g = window.__yui;
+    const meshes = (root) => {
+      let n = 0;
+      root.traverseVisible((o) => { if (o.isMesh) n++; });
+      return n;
+    };
+    const stage = g.roofDay.current;
+    return {
+      chapter: g.story.chapter,
+      mode: g.mode,
+      area: g.area,
+      target: g.interaction.target?.id ?? null,
+      active: g.interaction.isActive,
+      roofs: { sae: g.world.roofState('sae'), isuke: g.world.roofState('isuke') },
+      styles: Object.fromEntries([...g.npcViews].map(([id, v]) => [id, v.style])),
+      npcMeshes: Object.fromEntries([...g.npcViews].map(([id, v]) => [id, meshes(v.root)])),
+      where: Object.fromEntries(g.interaction.interactables.filter((i) => i.kind === 'npc').map((i) => [i.id, [i.position.x, i.position.z]])),
+      roofDayVisible: g.roofDay.root.visible,
+      stage: stage ? { outcome: stage.outcome, roles: stage.roles, crew: stage.crew.length, piles: stage.piles.map((p) => p.id), extent: stage.extent } : null,
+      crewRoots: g.roofDay.root.children.filter((c) => c.name.startsWith('crew:')).length,
+      carriers: g.roofDay.carriers.map((c) => [c.x, c.z]),
+      colliders: g.world.colliders.length,
+      player: [g.player.x, g.player.z],
+      calls: g.renderer.info.render.calls,
+      triangles: g.renderer.info.render.triangles,
+    };
+  });
+const waitP5 = async (cond, timeoutMs = 8000) => {
+  const t0 = Date.now();
+  let s = await p5();
+  while (!cond(s) && Date.now() - t0 < timeoutMs) { await wait(100); s = await p5(); }
+  return s;
+};
+/** 状態だけで第1幕の計画を決める（UI を通した決定は [P4] で確認済み）。 */
+const decideRoofState = (plan) =>
+  page.evaluate((plan) => {
+    const g = window.__yui;
+    const s = g.story;
+    const learn = [
+      ['sae.schedule', 'needsHelp'], ['sae.dateReason', 'burden'], ['sae.roof', 'worn'], ['sae.kaya', 'short'],
+      ['isuke.field', 'progress'], ['isuke.availability', 'dayBefore'], ['isuke.pastHelp', 'isukeView'],
+      ['sohei.schedule', 'kayaCutting'], ['mine.kaya', 'whyRecord'], ['mine.cutting', 'canLead'], ['ledger.basics', 'read'],
+    ];
+    for (const [t, st] of learn) s.learn(t, st);
+    s.setPlanDraft(plan);
+    for (const npc of s.planInvolved()) s.consultPlan(npc);
+    // 作業台で決めたときと同じ流れ（屋根葺きの日の知らせが出る）
+    g.decidePlan();
+    return s.outcome() ?? null;
+  }, plan);
+const closeNoticeOk = async () => {
+  await waitP5((s) => s.mode === 'notice');
+  await page.click('.notice-layer .menu-item[data-id="ok"]');
+  await waitP5((s) => s.mode === 'explore');
+};
+
+// ── 第1幕：建物・人物 ──
+const q5a = await p5();
+const idle = { toki: 'fidget', sae: 'handsFront', isuke: 'lookField', sohei: 'armsCrossed', mine: 'holdBook' };
+check('[P5] 5 人の住民が、それぞれの待機の型で立っている（全員が同じ棒立ちではない）',
+  JSON.stringify(q5a.styles) === JSON.stringify(idle), JSON.stringify(q5a.styles));
+check('[P5] 住民のモデルは部位ごとにまとめられている（体 8 回＋持ち物 1 回以内の描画）',
+  Object.values(q5a.npcMeshes).every((n) => n >= 8 && n <= 9), JSON.stringify(q5a.npcMeshes));
+check('[P5] 第1幕：サエ家の屋根は傷んだ見た目、伊助家はふつう、当日の作業の場はない',
+  q5a.roofs.sae === 'old' && q5a.roofs.isuke === 'old' && !q5a.roofDayVisible, JSON.stringify(q5a.roofs));
+
+// 5 地点：近くに立つと地点名が出る
+const AREAS = { southPlaza: [0, 17], saeHouse: [-11, 0], isukeHouse: [28, 2], soheiWorkshop: [0, -19], mineHouse: [-17, -2] };
+const reachedAreas = [];
+for (const [id, [x, z]] of Object.entries(AREAS)) {
+  await place(x, z, Math.PI);
+  const s = await waitP5((v) => v.area === id, 4000);
+  if (s.area === id) reachedAreas.push(id);
+}
+check('[P5] 5 地点すべてで地点の判定が働く', reachedAreas.length === 5, reachedAreas.join(','));
+
+// 調べられる物・住民のすべてに、正面から近づいて操作できる（モデルの大きさを変えても判定がずれていない）
+const targets = await page.evaluate(() => window.__yui.interaction.interactables.map((i) => ({ id: i.id, x: i.position.x, z: i.position.z, range: i.range })));
+const operated = [];
+const notOperated = [];
+for (const t of targets) {
+  let ok = false;
+  for (let k = 0; k < 8 && !ok; k++) {
+    const a = (k / 8) * Math.PI * 2;
+    const d = Math.min(1.4, t.range - 0.5);
+    const px = t.x + Math.sin(a) * d;
+    const pz = t.z + Math.cos(a) * d;
+    await place(px, pz, a + Math.PI);
+    await wait(250);
+    const v = await p5();
+    if (v.target !== t.id) continue;
+    await page.keyboard.press('KeyE');
+    const opened = await waitP5((s) => s.mode !== 'explore', 3000);
+    ok = opened.mode !== 'explore';
+    // 開いた画面（会話・作業台・結帳）を閉じる
+    for (let i = 0; i < 6 && (await p5()).mode !== 'explore'; i++) {
+      await page.keyboard.press('Escape');
+      await wait(300);
+    }
+  }
+  (ok ? operated : notOperated).push(t.id);
+}
+check(`[P5] 住民 5 人と調べられる物すべて（${targets.length} 件）に近づいて操作できる`, notOperated.length === 0, `ok=${operated.join(',')} / ng=${notOperated.join(',')}`);
+
+const q5calls1 = await (async () => {
+  await place(0, 31, Math.PI);
+  await page.evaluate(() => { const o = window.__yui.cameraRig.orbit; o.yaw = o.targetYaw = Math.PI; o.pitch = o.targetPitch = 0.42; o.distance = o.targetDistance = 10; });
+  await wait(800);
+  return p5();
+})();
+await page.screenshot({ path: `${OUT}/shot-60-p5-start.png` });
+
+// ── 屋根葺きの日：計画ごとに、来ている人・茅の山・足場が変わる ──
+const P5_PLANS = {
+  'solo-part': { date: 'keep', isuke: 'none', offer: 'none', kaya: 'own', kayaReturn: 'none', soheiCover: 'none' },
+  'prep-full': { date: 'keep', isuke: 'dayBefore', offer: 'harvestHelp', kaya: 'mine', kayaReturn: 'nextYearRecorded', soheiCover: 'none' },
+  'wait-full': { date: 'afterHarvest', isuke: 'dayOf', offer: 'none', kaya: 'mine', kayaReturn: 'nextYearRecorded', soheiCover: 'mineCovers' },
+};
+let q5roofDayCalls = 0;
+for (const [id, plan] of Object.entries(P5_PLANS)) {
+  await page.evaluate(() => localStorage.clear());
+  await page.reload({ waitUntil: 'networkidle0' });
+  await wait(2000);
+  const decided = await decideRoofState(plan);
+  await closeNoticeOk();
+  const s = await waitP5((v) => v.roofDayVisible);
+  const delayed = id.startsWith('wait');
+  const full = id.endsWith('full');
+  const rolesOk =
+    s.stage?.outcome === id &&
+    s.styles.sohei === 'direct' &&
+    (s.styles.isuke === 'carry') === delayed &&
+    (s.styles.mine === 'holdKaya') === (full && !delayed) &&
+    Object.keys(s.stage.roles).sort().join(',') === ['sohei', ...(delayed ? ['isuke'] : []), ...(full && !delayed ? ['mine'] : [])].sort().join(',');
+  check(`[P5] 当日（${id}）：決めた計画の結果になり、来ている住民と役割が計画と一致する`, decided === id && rolesOk, JSON.stringify({ decided, styles: s.styles, roles: s.stage?.roles }));
+  // 来ていない住民は作業の場にいない（伊助は畑、ミネは自宅）
+  const farFromSite = (xz) => Math.hypot(xz[0], xz[1] - 10) > 12;
+  check(`[P5] 当日（${id}）：参加していない住民は作業の場にいない`,
+    (delayed || farFromSite(s.where.isuke)) && ((full && !delayed) || farFromSite(s.where.mine)), JSON.stringify(s.where));
+  check(`[P5] 当日（${id}）：茅の山・足場の範囲・手伝いの人数が計画に合う`,
+    s.stage.extent === (full ? 'full' : 'part') && s.stage.piles.includes('mine') === full && s.crewRoots === s.stage.crew && s.crewRoots >= 3,
+    JSON.stringify({ ...s.stage, crewRoots: s.crewRoots }));
+  // 茅を運ぶ人が動く
+  // ソフトウェア描画ではゲーム内の時間の進みが遅いので、動き出すまで最大 15 秒待つ
+  const c0 = s.carriers;
+  const movedNow = (c1) => c0.some((p, i) => Math.hypot(p[0] - c1[i][0], p[1] - c1[i][1]) > 0.2);
+  const c1 = (await waitP5((v) => movedNow(v.carriers), 15000)).carriers;
+  const moved = movedNow(c1);
+  check(`[P5] 当日（${id}）：茅を運ぶ人が往復している`, moved, JSON.stringify({ c0, c1 }));
+  await place(0, 22, Math.PI);
+  await page.evaluate(() => { const o = window.__yui.cameraRig.orbit; o.yaw = o.targetYaw = Math.PI; o.pitch = o.targetPitch = 0.35; o.distance = o.targetDistance = 16; });
+  await wait(1200);
+  const shotState = await p5();
+  q5roofDayCalls = Math.max(q5roofDayCalls, shotState.calls);
+  await page.screenshot({ path: `${OUT}/shot-61-p5-roofday-${id}.png` });
+}
+
+// 茅を運ぶ人は、プレイヤーが通り道にいると立ち止まる（すり抜け・押し出しが起きない）
+// 運ぶ人が茅の山の側にいる間に、梯子の側の端（の少し先）にプレイヤーを立たせ、近づいてきた運ぶ人が手前で止まるか見る
+{
+  const path = await page.evaluate(() => {
+    const c = window.__yui.roofDay.carriers[0];
+    return { from: c.from, to: c.to };
+  });
+  const atPile = () => page.evaluate(() => {
+    const c = window.__yui.roofDay.carriers[0];
+    return c.phase === 'load' || (c.phase === 'back' && Math.hypot(c.x - c.from.x, c.z - c.from.z) < 0.3);
+  });
+  for (let i = 0; i < 150 && !(await atPile()); i++) await wait(100);
+  const len = Math.hypot(path.to.x - path.from.x, path.to.z - path.from.z);
+  const stand = { x: path.to.x + ((path.to.x - path.from.x) / len) * 0.3, z: path.to.z + ((path.to.z - path.from.z) / len) * 0.3 };
+  await place(stand.x, stand.z, 0);
+  // 運ぶ人が歩き出して、プレイヤーの手前で止まる（2 秒間動かない）まで見る（最大 30 秒）
+  let minDist = Infinity;
+  let pushed = 0;
+  let walked = false;
+  let lastC = null;
+  let stillFor = 0;
+  for (let i = 0; i < 150 && !(walked && stillFor >= 10); i++) {
+    await wait(200);
+    const s = await p5();
+    const c = s.carriers[0];
+    minDist = Math.min(minDist, Math.hypot(c[0] - s.player[0], c[1] - s.player[1]));
+    pushed = Math.max(pushed, Math.hypot(s.player[0] - stand.x, s.player[1] - stand.z));
+    const phase = await page.evaluate(() => window.__yui.roofDay.carriers[0].phase);
+    if (phase === 'out') walked = true;
+    stillFor = lastC && walked && Math.hypot(c[0] - lastC[0], c[1] - lastC[1]) < 0.005 ? stillFor + 1 : 0;
+    lastC = c;
+  }
+  check('[P5] 茅を運ぶ人は、通り道に立つプレイヤーの手前で止まり、押し出さない',
+    walked && stillFor >= 10 && minDist > 0.9 && minDist < 1.5 && pushed < 0.05,
+    `歩き出した ${walked} / 止まった ${stillFor >= 10} / 最小距離 ${minDist.toFixed(2)} / プレイヤーの移動 ${pushed.toFixed(2)}`);
+}
+
+// 当日の住民と話せる（宗平：段取りを指示している）
+await talkTo('sohei', -4.8, 12.4, Math.PI);
+check('[P5] 当日、段取りをしている宗平と話せる', (await page.evaluate(() => window.__yui.story.flagList())).includes('talked:sohei'));
+
+// ── 三年後：作業の場は片付き、サエは杖をつく。屋根の見た目が変わる ──
+await page.evaluate(() => {
+  const g = window.__yui;
+  g.story.set('roofDay:ended');
+  g.enterChapter3();
+});
+const q5c = await waitP5((s) => s.chapter === 'ch3');
+check('[P5] 第3幕：当日の作業の場は片付き、当たり判定も残らない', !q5c.roofDayVisible && q5c.stage === null && q5c.colliders === q5a.colliders, JSON.stringify({ visible: q5c.roofDayVisible, colliders: [q5a.colliders, q5c.colliders] }));
+check('[P5] 第3幕：サエは杖をつき、ほかの住民は普段の立ち姿に戻る',
+  q5c.styles.sae === 'cane' && q5c.styles.sohei === 'armsCrossed' && q5c.styles.isuke === 'lookField' && q5c.styles.mine === 'holdBook', JSON.stringify(q5c.styles));
+check('[P5] 第3幕：サエ家の南面は葺き替え後（ミネの茅）、伊助家の屋根は傷んでいる',
+  q5c.roofs.sae === 'renewed' && q5c.roofs.isuke === 'worn', JSON.stringify(q5c.roofs));
+await talkTo('sae', ...SPOT.sae);
+check('[P5] 杖をついたサエとも話せる', (await page.evaluate(() => window.__yui.story.flagList())).includes('talked:sae'));
+await page.evaluate(() => { const g = window.__yui; g.player.x = 2.6; g.player.z = 13.4; });
+await wait(600);
+await page.screenshot({ path: `${OUT}/shot-62-p5-ch3-sae.png` });
+
+// 記録して読み込み直しても、見た目（屋根・立ち姿）が戻る
+await page.evaluate(() => window.__yui.saveGame());
+await page.reload({ waitUntil: 'networkidle0' });
+await wait(2000);
+await page.click('.notice-layer .menu-item[data-id="continue"]');
+const q5r = await waitP5((s) => s.mode === 'explore' && s.chapter === 'ch3');
+check('[P5] 再読み込み後も、第3幕の屋根の見た目と、サエの立ち姿が戻る',
+  q5r.roofs.sae === 'renewed' && q5r.roofs.isuke === 'worn' && q5r.styles.sae === 'cane' && !q5r.roofDayVisible, JSON.stringify({ roofs: q5r.roofs, styles: q5r.styles }));
+
+// 描画負荷（ソフトウェア描画のため FPS は参考にならない。描画呼び出し数で確認する）
+check('[P5] 描画呼び出し数が極端に増えていない（第1幕 300 以下・屋根葺きの日 450 以下）',
+  q5calls1.calls <= 300 && q5roofDayCalls <= 450, `第1幕 ${q5calls1.calls} / 屋根葺きの日 ${q5roofDayCalls}`);
 
 // F3 デバッグ表示
 await page.keyboard.press('F3');

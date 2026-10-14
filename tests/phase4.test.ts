@@ -12,9 +12,9 @@ import {
   PLAN_ROOF,
   RELEVANT_TOPICS,
   RESPONSE_SUMMARY,
-  VILLAGERS,
   forecastPlan,
 } from '../src/content/plan';
+import { roofDayColliders, roofDayStage, staticCrew } from '../src/content/staging';
 import { ENDINGS, INITIAL_PLAN3, RELEVANT_TOPICS3, RESPONSE_SUMMARY3, forecastPlan3 } from '../src/content/plan3';
 import { HOUSEHOLDS, STORY_DEFS } from '../src/content/story';
 import { currentObjective } from '../src/content/objectives';
@@ -514,16 +514,24 @@ describe('保存（版3）と移行', () => {
 describe('屋根葺き当日の立ち位置と、情報の整理', () => {
   const world = buildCollisionMap({ buildings: BUILDINGS, props: PROPS, trees: TREES });
 
-  it.each(Object.keys(PLANS))('「%s」の当日、住民と村の人たちの立ち位置は障害物・道と重ならず、話しかけに行ける', (id) => {
+  // Phase 5：名前のない村の人たち・茅の山・梯子は、計画ごとの当日の様子（content/staging.ts）から置く
+  it.each(Object.keys(PLANS))('「%s」の当日、住民と村の人たち・茅の山・梯子は障害物・道と重ならず、話しかけに行ける', (id) => {
     const o = OUTCOMES[id]!;
+    const stage = roofDayStage(id)!;
     const npcs = NPCS.map((n) => {
       const p = o.placements[n.character];
       return p ? { ...n, position: p.position, heading: p.heading } : n;
     });
-    const villagers = VILLAGERS.map((v) => ({ kind: 'circle' as const, x: v.position.x, z: v.position.z, radius: 0.4 }));
-    const people = [...npcs.map((n) => n.position), ...VILLAGERS.map((v) => v.position)];
+    const stageColliders = roofDayColliders(stage);
+    const crew = staticCrew(stage);
+    const people = [...npcs.map((n) => n.position), ...crew.map((c) => c.position)];
     for (const p of people) {
       for (const c of world) expect(penetration(p, NPC_COLLIDER_RADIUS, c)).toBeNull();
+      // 人は茅の山・梯子と重ならない（自分自身の判定は除く）
+      for (const c of stageColliders) {
+        if (c.kind === 'circle' && c.x === p.x && c.z === p.z) continue;
+        expect(penetration(p, NPC_COLLIDER_RADIUS, c)).toBeNull();
+      }
       for (const q of people) if (q !== p) expect(Math.hypot(q.x - p.x, q.z - p.z)).toBeGreaterThan(1.2);
       for (const path of PATHS) {
         for (let i = 0; i + 1 < path.points.length; i++) {
@@ -531,10 +539,22 @@ describe('屋根葺き当日の立ち位置と、情報の整理', () => {
         }
       }
     }
-    const map = buildReachability([...world, ...npcColliders(npcs), ...villagers], WALK_BOUNDS, PLAYER_START.position, DEFAULT_PLAYER_TUNING.radius);
+    // 茅の山・梯子も道の上に置かない（道の中心線に沿って、道幅の円が重ならないか調べる）
+    for (const path of PATHS) {
+      for (let i = 0; i + 1 < path.points.length; i++) {
+        const a = path.points[i]!;
+        const b = path.points[i + 1]!;
+        const n = Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / 0.25);
+        for (let k = 0; k <= n; k++) {
+          const pt = { x: a.x + ((b.x - a.x) * k) / n, z: a.z + ((b.z - a.z) * k) / n };
+          for (const c of stageColliders) expect(penetration(pt, path.width / 2, c), `${c.x},${c.z}`).toBeNull();
+        }
+      }
+    }
+    const map = buildReachability([...world, ...npcColliders(npcs), ...stageColliders], WALK_BOUNDS, PLAYER_START.position, DEFAULT_PLAYER_TUNING.radius);
     for (const n of npcs) expect(map.nearestReachable(n.position), n.id).toBeLessThan(n.range - 0.4);
-    // 結帳・作業台にも行ける
-    for (const id2 of ['ledger', 'planTable']) {
+    // 結帳・作業台・サエ家の屋根（当日は「作業中」）にも行ける
+    for (const id2 of ['ledger', 'planTable', 'saeRoof']) {
       const def = INTERACTABLES.find((i) => i.id === id2)!;
       expect(map.nearestReachable(def.position)).toBeLessThan(def.range - 0.4);
     }
