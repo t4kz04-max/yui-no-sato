@@ -1,3 +1,4 @@
+import { parseEmphasis, type TextSegment } from '../dialogue/markup';
 /**
  * 画面下部の会話ウィンドウ（設計書 M 節）。表示と DOM 操作だけを担当し、
  * 会話の進行は呼び出し側（InteractionSystem）に任せる。
@@ -38,6 +39,8 @@ export class DialogueBox {
   private readonly choicesEl: HTMLElement;
   private model: DialogueBoxModel | null = null;
   private shown = 0;
+  private segments: TextSegment[] = [];
+  private plainLength = 0;
   private renderedChoicesKey = '';
   private choicesVisibleTime = 0;
 
@@ -73,7 +76,7 @@ export class DialogueBox {
 
   /** 文字送りの途中か。 */
   get isRevealing(): boolean {
-    return this.model !== null && this.shown < this.model.text.length;
+    return this.model !== null && this.shown < this.plainLength;
   }
 
   /** 選択肢をキーで選んでよいか（表示されてから少し経ったか）。 */
@@ -87,6 +90,8 @@ export class DialogueBox {
     this.layer.hidden = false;
     if (pageChanged) {
       this.shown = 0;
+      this.segments = parseEmphasis(model.text);
+      this.plainLength = this.segments.reduce((n, seg) => n + seg.text.length, 0);
       const title = model.speakerName ?? model.subject ?? null;
       this.nameEl.textContent = title ?? '';
       this.nameEl.hidden = title === null;
@@ -107,7 +112,7 @@ export class DialogueBox {
 
   revealAll(): void {
     if (!this.model) return;
-    this.shown = this.model.text.length;
+    this.shown = this.plainLength;
     this.renderText();
     this.renderChoices();
   }
@@ -115,14 +120,23 @@ export class DialogueBox {
   update(dt: number): void {
     if (!this.choicesEl.hidden) this.choicesVisibleTime += dt;
     if (!this.model || !this.isRevealing) return;
-    this.shown = Math.min(this.model.text.length, this.shown + dt * CHARS_PER_SECOND);
+    this.shown = Math.min(this.plainLength, this.shown + dt * CHARS_PER_SECOND);
     this.renderText();
     if (!this.isRevealing) this.renderChoices();
   }
 
   private renderText(): void {
     if (!this.model) return;
-    this.textEl.textContent = this.model.text.slice(0, Math.floor(this.shown));
+    // 強調（**…**）を保ったまま、表示した文字数の分だけ描く
+    let remaining = Math.floor(this.shown);
+    const nodes: Node[] = [];
+    for (const seg of this.segments) {
+      if (remaining <= 0) break;
+      const text = seg.text.slice(0, remaining);
+      remaining -= text.length;
+      nodes.push(seg.strong ? el('strong', 'dialogue-em', text) : document.createTextNode(text));
+    }
+    this.textEl.replaceChildren(...nodes);
     this.nextEl.hidden = this.isRevealing || this.model.choices.length > 0;
   }
 
@@ -157,8 +171,9 @@ export class DialogueBox {
   }
 }
 
-function el(tag: string, className: string): HTMLElement {
+function el(tag: string, className: string, text?: string): HTMLElement {
   const e = document.createElement(tag);
   e.className = className;
+  if (text !== undefined) e.textContent = text;
   return e;
 }

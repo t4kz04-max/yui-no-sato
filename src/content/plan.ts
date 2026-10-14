@@ -1,4 +1,15 @@
-import { all, knows, learn, setConsent, setFlag, type Condition, type Effect } from '../story/conditions';
+import {
+  all,
+  any,
+  evaluate,
+  knows,
+  learn,
+  setConsent,
+  setFlag,
+  type Condition,
+  type Effect,
+  type StoryQuery,
+} from '../story/conditions';
 import type { NpcId, PlanItemDef, PlanningDefs, PlanRule, PlanSpec } from '../story/types';
 import type { LedgerEntry } from './ledger';
 
@@ -150,6 +161,130 @@ export const RESPONSE_SUMMARY: Readonly<Record<string, string>> = {
   delayWithReturn: '延ばすのは心配。待つあいだ、伊助さんの刈り入れを手伝う',
 };
 
+/** 作業台で「この案に関わる事情」として出す情報（項目 → 選んだ選択肢 → 情報）。 */
+export const RELEVANT_TOPICS: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> = {
+  date: { keep: ['sae.dateReason', 'sae.roof'], afterHarvest: ['sae.roof', 'sae.dateReason', 'isuke.field'] },
+  isuke: {
+    none: ['isuke.pastHelp'],
+    dayOf: ['isuke.availability', 'isuke.pastHelp'],
+    dayBefore: ['isuke.availability', 'isuke.field'],
+  },
+  offer: { none: [], harvestHelp: ['isuke.field', 'sae.dateReason'] },
+};
+
+// ───────── 見込み（作業台で、決める前に見せる） ─────────
+
+export interface ForecastLine {
+  /** 観点（屋根／伊助の刈り入れ／サエ家が負うこと／伊助の関わり）。 */
+  readonly aspect: string;
+  readonly text: string;
+  /** 情報が足りず、見通せない部分がある。 */
+  readonly uncertain: boolean;
+}
+
+/**
+ * その案で起きることの見込み。案の内容から決まり、**知っている情報の分だけ**見通せる。
+ * 点数や記号にせず、文章で示す（何を大切にするかはプレイヤーが決める）。
+ * docs/PHASE3_5_IMPROVEMENT.md「C」。
+ */
+export function forecastPlan(plan: PlanSpec, q: StoryQuery): ForecastLine[] {
+  if (PLANNING.invalidReason(plan) !== null) return [];
+  const { date, isuke, offer } = plan;
+  const helps = offer === 'harvestHelp';
+  const k = (c: Condition) => evaluate(c, q);
+  const knowsRoof = k(any(knows('sae.roof'), knows('sae.dateReason', 'roofWorry')));
+  const knowsHarvest = k(knows('isuke.availability', 'harvest'));
+  const knowsProgress = k(knows('isuke.field', 'progress'));
+  const knowsPast = k(knows('isuke.pastHelp'));
+  const knowsBurden = k(knows('sae.dateReason', 'burden'));
+  const line = (aspect: string, text: string, uncertain = false): ForecastLine => ({ aspect, text, uncertain });
+  const lines: ForecastLine[] = [];
+
+  // 屋根
+  if (date === 'keep') {
+    lines.push(
+      line(
+        '屋根',
+        isuke === 'none'
+          ? '予定日に葺く。人手が少なく、二日がかりになる'
+          : isuke === 'dayBefore'
+            ? '予定日に、一日で葺ける（前日に準備が済むため）'
+            : '予定日に葺く（伊助が来られれば一日で済む）',
+      ),
+    );
+  } else {
+    const when = knowsProgress
+      ? helps
+        ? '七日ほど先に葺く（刈り入れが早く済むため）。'
+        : '十日ほど先に葺く。'
+      : '刈り入れが済むまで待つ（いつ済むかは、畑の様子をよく知らないので分からない）。';
+    const damage = knowsRoof
+      ? helps
+        ? '待つあいだに、傷みは少し進む'
+        : '待つあいだに傷みが広がり、手間と茅が余計に要る'
+      : '待つあいだ屋根がどうなるかは、まだ分からない（屋根をよく見ていない）';
+    lines.push(line('屋根', when + damage, !knowsProgress || !knowsRoof));
+  }
+
+  // 伊助の刈り入れ
+  if (isuke === 'none') lines.push(line('伊助の刈り入れ', '今までどおり続けられる'));
+  else if (date === 'keep' && isuke === 'dayOf') {
+    lines.push(
+      knowsHarvest
+        ? line('伊助の刈り入れ', '屋根葺きの日と重なる。伊助は来られない')
+        : line('伊助の刈り入れ', '伊助の都合は分からない（断られた理由を知らない）', true),
+    );
+  } else if (date === 'keep' && isuke === 'dayBefore') {
+    lines.push(
+      line(
+        '伊助の刈り入れ',
+        '前日の半日、刈り入れが止まる。天気が崩れれば、稲が傷む恐れがある' + (helps ? '。遅れはサエ家の手で取り戻す' : ''),
+      ),
+    );
+  } else {
+    lines.push(line('伊助の刈り入れ', helps ? 'サエ家の手が加わり、早く済む' : '刈り入れを先に済ませられる'));
+  }
+
+  // サエ家が負うこと
+  const past = knowsPast ? '十二年前の返しも、まだ残っている' : '';
+  if (isuke === 'none') {
+    lines.push(line('サエ家が負うこと', ['新しい約束は増えない', past].filter(Boolean).join('。')));
+  } else if (helps && date === 'keep') {
+    lines.push(
+      line(
+        'サエ家が負うこと',
+        ['屋根葺きのすぐ後、伊助家の刈り入れに人を出す約束が残る', knowsPast ? '十二年前の返しと約束が重なる' : '']
+          .filter(Boolean)
+          .join('。'),
+      ),
+    );
+  } else if (helps) {
+    lines.push(line('サエ家が負うこと', '自分の屋根を後回しにして、伊助家の田に人を出す（手伝いはその場で済む）'));
+  } else {
+    lines.push(
+      line(
+        'サエ家が負うこと',
+        ['伊助にまた手を借り、返しが増える', past, knowsBurden ? 'サエはそれを気に病んでいる' : ''].filter(Boolean).join('。'),
+      ),
+    );
+  }
+
+  // 伊助の関わり
+  lines.push(
+    line(
+      '伊助の関わり',
+      isuke === 'none'
+        ? '今回の屋根葺きには加わらない'
+        : isuke === 'dayBefore'
+          ? '前日の準備に加わる'
+          : date === 'keep'
+            ? '当日に来てもらう（都合がつけば）'
+            : '刈り入れの後、当日に屋根へ上がる',
+    ),
+  );
+  return lines;
+}
+
 // ───────── 結果 ─────────
 
 export interface OutcomeLine {
@@ -158,16 +293,31 @@ export interface OutcomeLine {
   readonly when?: Condition;
 }
 
+/** 結果の後の村での立ち位置（住民が結果に応じた場所にいる）。 */
+export interface Placement {
+  readonly position: { readonly x: number; readonly z: number };
+  readonly heading: number;
+}
+
 export interface OutcomeDef {
   readonly id: string;
   readonly title: string;
+  /** 一行の要約（「選ばなかった案」などで使う）。 */
+  readonly tagline: string;
   /** いつのことか（結果画面の見出し）。 */
   readonly when: string;
+  /** 短い情景（2〜3文）。 */
   readonly story: readonly OutcomeLine[];
-  /** 何が変わったか（点数ではなく具体的な変化）。 */
-  readonly changes: ReadonlyArray<{ readonly label: string; readonly text: string }>;
+  /** その判断によって実現したこと。 */
+  readonly achieved: readonly OutcomeLine[];
+  /** その代わりに残った負担や約束。 */
+  readonly costs: readonly OutcomeLine[];
   /** 結帳に書き加えられる記録。 */
   readonly ledger: LedgerEntry;
+  /** 結果の後、いつもと違う場所にいる住民（人物 ID → 立ち位置）。 */
+  readonly placements: Readonly<Record<string, Placement>>;
+  /** 伊助家の刈り入れが済み、はさ掛けに稲がすべて掛かっているか。 */
+  readonly harvestDone: boolean;
 }
 
 const village = (detail: string): LedgerEntry['items'][number] => ({
@@ -180,16 +330,21 @@ const village = (detail: string): LedgerEntry['items'][number] => ({
   settlementNote: 'それぞれの家の屋根葺きの折に返す。',
 });
 
+/** 伊助が刈り入れを済ませてサエ家の前に来ている（R3・R3'）。 */
+const ISUKE_AT_SAE: Placement = { position: { x: -2.9, z: 12.0 }, heading: 1.79 };
+/** サエが伊助の畑で刈り入れを手伝っている（R2）。 */
+const SAE_AT_FIELD: Placement = { position: { x: 37.0, z: 10.6 }, heading: Math.PI };
+
 export const OUTCOMES: Readonly<Record<string, OutcomeDef>> = {
   r1: {
     id: 'r1',
     title: '少ない人手で、予定どおりに',
+    tagline: '伊助に頼まず、予定日に二日がかりで葺く',
     when: '屋根葺きの日',
     story: [
-      { text: '予定どおりの日、サエ家の屋根葺きが始まった。伊助さんには頼まず、サエ家の人たちと手の空いた村の人たちで茅を運び、屋根に上った。' },
-      { text: '人手が足りず、葺き終わるまでに二日かかった。日が暮れるまで縄を締める音が続いた。' },
+      { text: '伊助さんには頼まず、サエ家の人たちと手の空いた村の人たちで屋根に上った。人手が足りず、葺き終わるまでに二日かかった。' },
       {
-        text: '伊助さんは、その二日間も畑で稲を刈っていた。屋根の方を一度だけ見上げて、また鎌を動かしていたという。',
+        text: 'そのあいだも、伊助さんは畑で稲を刈っていた。',
         when: knows('isuke.availability', 'harvest'),
       },
       {
@@ -197,16 +352,16 @@ export const OUTCOMES: Readonly<Record<string, OutcomeDef>> = {
         when: all(knows('isuke.availability'), { topic: 'isuke.availability', below: 'harvest' }),
       },
       { text: '伊助さんには、最後まで声をかけなかった。', when: { topic: 'isuke.availability', below: 'declined' } },
-      {
-        text: '「伊助さんに無理をさせずに済んだ」とサエさんは言った。ただ、十二年前の手伝いの返しは、結帳に「まだ」のまま残っている。',
-        when: knows('sae.dateReason', 'burden'),
-      },
     ],
-    changes: [
-      { label: '屋根', text: '予定日に葺き替えた（人手が少なく二日がかり）' },
-      { label: '伊助', text: '関わっていない。刈り入れは予定どおり続いた' },
-      { label: 'サエ家', text: '新しい約束はない。十二年前の返しは残ったまま' },
-      { label: '結帳', text: '村の人たちの手伝いが記された' },
+    achieved: [
+      { text: '屋根は予定日に葺き替えた' },
+      { text: '伊助の刈り入れは、何も止めずに済んだ' },
+      { text: 'サエ家に新しい約束は増えなかった' },
+    ],
+    costs: [
+      { text: '人手が足りず、二日がかりになった（サエ家の人たちは疲れ切った）' },
+      { text: '伊助は今回の屋根葺きに加わらなかった' },
+      { text: '十二年前の伊助家への返しは、まだ残っている', when: knows('isuke.pastHelp') },
     ],
     ledger: {
       id: 'L3',
@@ -215,25 +370,26 @@ export const OUTCOMES: Readonly<Record<string, OutcomeDef>> = {
       items: [village('数人・二日（サエ家の人たちとともに）')],
       relatedTopics: ['sae.roof', 'isuke.availability', 'sae.dateReason'],
     },
+    placements: {},
+    harvestDone: false,
   },
   r2: {
     id: 'r2',
     title: '前日の準備を分け合って',
+    tagline: '伊助に前日の準備を頼み、刈り入れを手伝う約束をする',
     when: '屋根葺きの前日と当日',
     story: [
-      { text: '屋根葺きの前の日、伊助さんが半日だけ畑を離れ、茅を運び、足場を組むのを手伝ってくれた。' },
-      { text: 'おかげで当日は段取りよく進み、屋根は一日で葺き上がった。' },
-      { text: 'その代わり、サエ家からは伊助家の刈り入れに人を出すことになった。サエ家にとっても、楽な約束ではない。' },
-      {
-        text: '結帳には、十二年前の「まだ」の記録の後に、新しい約束が書き加えられた。',
-        when: knows('isuke.pastHelp'),
-      },
+      { text: '前の日、伊助さんが半日だけ畑を離れ、茅を運び、足場を組んでくれた。当日は段取りよく進み、屋根は一日で葺き上がった。' },
+      { text: '屋根葺きの翌日から、サエ家の人が伊助さんの田に出ている。' },
     ],
-    changes: [
-      { label: '屋根', text: '予定日に、一日で葺き替えた' },
-      { label: '伊助', text: '前日の半日を手伝った。刈り入れは半日遅れた' },
-      { label: 'サエ家', text: '伊助家の刈り入れを手伝う約束が残った' },
-      { label: '結帳', text: '伊助家の前日の手伝い（返しはまだ）と、新しい約束が記された' },
+    achieved: [
+      { text: '屋根は予定日に、一日で葺き替えた' },
+      { text: '伊助も前日の準備に加わった' },
+    ],
+    costs: [
+      { text: '伊助の刈り入れは半日止まった（天気がもってくれた）' },
+      { text: 'サエ家は、屋根葺きのすぐ後に伊助家の刈り入れを手伝う約束を負った' },
+      { text: '十二年前の返しも残ったまま、新しい約束が重なった', when: knows('isuke.pastHelp') },
     ],
     ledger: {
       id: 'L3',
@@ -253,22 +409,26 @@ export const OUTCOMES: Readonly<Record<string, OutcomeDef>> = {
       ],
       relatedTopics: ['sae.roof', 'isuke.availability', 'isuke.field'],
     },
+    placements: { sae: SAE_AT_FIELD },
+    harvestDone: false,
   },
   r3: {
     id: 'r3',
     title: '刈り入れを待って',
+    tagline: '刈り入れの後に延ばし、伊助に当日来てもらう',
     when: '十日後',
     story: [
-      { text: '屋根葺きは、伊助さんの刈り入れが済むまで延ばされた。' },
-      { text: '待つあいだに雨の日が続き、屋根の傷みは思った以上に広がっていた。葺き替えの手間は増えた。' },
-      { text: 'それでも当日は伊助さんも朝から屋根に上がり、人手のそろった作業になった。' },
-      { text: 'サエさんは喜びながらも、「また伊助さんに頼ってしまった」と小さく言った。', when: knows('sae.dateReason', 'burden') },
+      { text: '屋根葺きは、伊助さんの刈り入れが済むまで延ばされた。待つあいだに雨の日が続き、屋根の傷みは思った以上に広がっていた。' },
+      { text: '当日は伊助さんも朝から屋根に上がり、人手のそろった作業になった。' },
     ],
-    changes: [
-      { label: '屋根', text: '十日後に葺き替えた。傷みが広がった分、手間が増えた' },
-      { label: '伊助', text: '刈り入れの後、当日の作業に加わった' },
-      { label: 'サエ家', text: '伊助家への返しが、十二年前の分に加えて増えた' },
-      { label: '結帳', text: '伊助家の当日の手伝い（返しはまだ）が記された' },
+    achieved: [
+      { text: '伊助も当日の作業に加わり、人手がそろった' },
+      { text: '伊助の刈り入れは、何も止めずに済んだ' },
+    ],
+    costs: [
+      { text: '十日待つあいだに傷みが広がり、葺き替えの手間と茅が余計にかかった' },
+      { text: 'サエ家は伊助家への返しを、さらに一つ負った' },
+      { text: 'サエは「また伊助さんに頼ってしまった」と気に病んでいる', when: knows('sae.dateReason', 'burden') },
     ],
     ledger: {
       id: 'L3',
@@ -288,25 +448,27 @@ export const OUTCOMES: Readonly<Record<string, OutcomeDef>> = {
       ],
       relatedTopics: ['sae.roof', 'isuke.availability', 'isuke.pastHelp'],
     },
+    placements: { isuke: ISUKE_AT_SAE },
+    harvestDone: true,
   },
   r3help: {
     id: 'r3help',
     title: '刈り入れを手伝い、待って',
+    tagline: '先に伊助家の刈り入れを手伝い、その後で葺く',
     when: '七日後',
     story: [
-      { text: 'サエ家から人を出して、伊助さんの刈り入れを手伝った。人手が増えた分、刈り入れは早く片づいた。' },
-      { text: '屋根葺きは七日後。待つあいだに傷みは少し進んだが、伊助さんも当日の作業に加わった。' },
-      { text: 'サエ家は自分の屋根を待ちながら、よその田に人を出した。楽な七日間ではなかった。' },
-      {
-        text: '結帳には、サエ家が出した手と、伊助家が出した手が、並んで書きつけられた。どう釣り合うのかは、どこにも書かれていない。',
-        when: knows('ledger.basics'),
-      },
+      { text: 'サエ家から人を出して、伊助さんの刈り入れを手伝った。刈り入れは早く片づき、屋根葺きは七日後になった。' },
+      { text: '当日は伊助さんも屋根に上がった。' },
     ],
-    changes: [
-      { label: '屋根', text: '七日後に葺き替えた。傷みは少し進んだ' },
-      { label: '伊助', text: '刈り入れが早く済み、当日の作業に加わった' },
-      { label: 'サエ家', text: '待つあいだに伊助家の刈り入れを手伝った' },
-      { label: '結帳', text: 'サエ家の刈り入れの手伝いと、伊助家の当日の手伝いが並んで記された' },
+    achieved: [
+      { text: '伊助も当日の作業に加わり、人手がそろった' },
+      { text: '伊助家の刈り入れが早く済んだ' },
+      { text: 'サエ家の手伝いは、その場で果たした（約束は残っていない）' },
+    ],
+    costs: [
+      { text: '七日待つあいだに、屋根の傷みは少し進んだ' },
+      { text: 'サエ家は自分の屋根を後回しにして、よその田に人を出した' },
+      { text: '互いに出した手がどう釣り合うのかは、結帳にも書かれていない', when: knows('ledger.basics') },
     ],
     ledger: {
       id: 'L3',
@@ -335,5 +497,7 @@ export const OUTCOMES: Readonly<Record<string, OutcomeDef>> = {
       ],
       relatedTopics: ['sae.roof', 'isuke.availability', 'isuke.pastHelp'],
     },
+    placements: { isuke: ISUKE_AT_SAE },
+    harvestDone: true,
   },
 };

@@ -4,7 +4,7 @@ import { DIALOGUES } from '../src/content/dialogues';
 import { INTERACTABLES } from '../src/content/interactables';
 import { LEDGER } from '../src/content/ledger';
 import { currentObjective } from '../src/content/objectives';
-import { INITIAL_PLAN, OUTCOMES, PLANNING, RESPONSE_SUMMARY } from '../src/content/plan';
+import { INITIAL_PLAN, OUTCOMES, PLANNING, RELEVANT_TOPICS, RESPONSE_SUMMARY, forecastPlan } from '../src/content/plan';
 import { HOUSEHOLDS, STORY_DEFS } from '../src/content/story';
 import { InteractionSystem } from '../src/interaction/InteractionSystem';
 import { buildLedger, buildNotebook } from '../src/journal/models';
@@ -24,7 +24,8 @@ const src: PlanSources = {
   planSummaries: RESPONSE_SUMMARY,
   summaries: RESPONSE_SUMMARY,
   outcomes: OUTCOMES,
-  considerationTopics: ['sae.dateReason', 'sae.roof', 'isuke.availability', 'isuke.field', 'isuke.pastHelp'],
+  forecast: forecastPlan,
+  relevantTopics: RELEVANT_TOPICS,
 };
 
 function newGame() {
@@ -137,12 +138,13 @@ describe('縦切り試作：探索 → 計画 → 相談 → 見直し → 結�
     expect(story.currentStage('sae.roof')).toBe('renewed');
     const view = buildOutcome(story, OUTCOMES)!;
     expect(view.title).toBe('前日の準備を分け合って');
-    expect(view.story.join()).toContain('新しい約束が書き加えられた');
+    expect(view.costs.join()).toContain('新しい約束が重なった');
+    expect(view.costs.join()).toContain('刈り入れを手伝う約束');
 
     // 決定後は案を変えられず、住民の台詞が変わる
     expect(story.setPlanDraft({ date: 'keep', isuke: 'none', offer: 'none' })).toBe(false);
-    expect(talk(sys, 'isuke')[0]).toContain('前の日の分は');
-    expect(talk(sys, 'toki')[0]).toContain('前の日の伊助さん');
+    expect(talk(sys, 'isuke')[0]).toContain('サエさんが手伝いに来てくれとる');
+    expect(talk(sys, 'toki')[0]).toContain('伊助さんの田んぼに出てる');
     expect(currentObjective(story)).toContain('屋根葺きを終えた村');
 
     // 結帳に今年の記録と約束が書き加わる
@@ -162,7 +164,7 @@ describe('縦切り試作：探索 → 計画 → 相談 → 見直し → 結�
     expect(story.decidePlan()).toBe('r1');
     const view = buildOutcome(story, OUTCOMES)!;
     expect(view.story.join()).toContain('伊助さんには、最後まで声をかけなかった');
-    expect(view.story.join()).not.toContain('鎌を動かしていた');
+    expect(view.story.join()).not.toContain('畑で稲を刈っていた');
     expect(story.allPromises()).toEqual([]);
     expect(talk(sys, 'isuke')[0]).toContain('サエさんの屋根、葺き替わったな');
   });
@@ -177,7 +179,7 @@ describe('縦切り試作：探索 → 計画 → 相談 → 見直し → 結�
     consult(sys, 'sae');
     story.decidePlan();
     const text = buildOutcome(story, OUTCOMES)!.story.join();
-    expect(text).toContain('鎌を動かしていた');
+    expect(text).toContain('畑で稲を刈っていた');
     expect(text).not.toContain('聞けずじまい');
   });
 

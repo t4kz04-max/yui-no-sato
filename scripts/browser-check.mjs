@@ -3,6 +3,7 @@
  * - Phase 0：起動・移動・衝突・カメラ・ズーム・リサイズ・コンソールエラー
  * - Phase 1（[P1]）：案内表示、会話の開始・送り・選択・終了、会話中の操作制御、調査、状態による選択肢の変化
  * - Phase 2（[P2]）：手帳、結帳、ポーズ、会話の中断、記録（保存・続きから・壊れた記録・やり直し）
+ * - Phase 3.5（[P3.5]）：各画面が 1280x720 と 1024x640 で画面内に収まり文字が十分な大きさか、見込み・承諾を得た案の比較・結果画面の構成、結果の後の住民の立ち位置
  * - Phase 3（[P3]）：作業台で案を作る・変える、住民との相談、見直し、決定、結果、結果の後の村、記録の復元
  *
  *   npm run test:browser
@@ -589,6 +590,8 @@ check('[P3] サエと伊助が承諾すると、計画を決められる状態�
 // 決定 → 確認 → 結果
 const q7 = await openPlan();
 check('[P3] 全員が承諾した案では「この案で決める」が押せる', q7.decideDisabled === false);
+const agreedCards = await page.evaluate(() => document.querySelectorAll('.plan-agreed-card').length);
+check('[P3.5] 承諾を得た案が一覧に並び、見込みで見比べられる', agreedCards >= 1, `${agreedCards} 件`);
 await page.click('.plan-decide');
 await waitP3((s) => s.notice);
 await page.screenshot({ path: `${OUT}/shot-31-confirm.png` });
@@ -596,6 +599,14 @@ await page.click('.notice-layer .menu-item[data-id="yes"]');
 const q8 = await waitP3((s) => s.result);
 check('[P3] 決めると結果画面が出る（前日準備の分担）', q8.result && q8.outcome === 'r2' && /前日の準備を分け合って/.test(q8.resultTitle), q8.resultTitle);
 await page.screenshot({ path: `${OUT}/shot-32-result.png` });
+const rsec = await page.evaluate(() => ({
+  decided: document.querySelector('.result-block.is-decided')?.textContent ?? '',
+  achieved: document.querySelectorAll('.result-block.is-achieved li').length,
+  costs: [...document.querySelectorAll('.result-block.is-costs li')].map((li) => li.textContent).join(' / '),
+}));
+check('[P3.5] 結果画面は「決めたこと」「実現したこと」「残ったこと」に分かれている', /前日の準備を頼む/.test(rsec.decided) && rsec.achieved > 0 && /約束/.test(rsec.costs), rsec.costs);
+const rlay = await page.evaluate(() => { const e = document.querySelector('.result').getBoundingClientRect(); const t = document.querySelector('.result-block li'); return { inView: e.top >= 0 && e.bottom <= innerHeight + 0.5 && e.left >= 0 && e.right <= innerWidth + 0.5, font: parseFloat(getComputedStyle(t).fontSize) }; });
+check('[P3.5] 結果画面は画面に収まり、本文は16px以上', rlay.inView && rlay.font >= 16, JSON.stringify(rlay));
 await page.keyboard.press('Enter');
 const q9 = await waitP3((s) => !s.result);
 check('[P3] 結果を閉じると村に戻り、屋根の見た目が葺き替え後に変わる', q9.mode === 'explore' && q9.roofColor !== roofBefore && q9.roofColor === 0xb39a64, `${roofBefore?.toString(16)} → ${q9.roofColor?.toString(16)}`);
@@ -639,6 +650,95 @@ const promises = await page.evaluate(() => window.__yui.story.allPromises().map(
 check('[P3] 再読み込み後も、決めた計画・結果・約束・屋根の見た目が戻る',
   r3.outcome === 'r2' && r3.phase === 'decided' && promises.includes('saeHelpsIsukeHarvest') && r3.roofColor === 0xb39a64,
   `${r3.outcome} / ${promises.join(',')} / ${r3.roofColor?.toString(16)}`);
+
+// ───────── Phase 3.5：読みやすさ（画面に収まる・文字の大きさ）と結果の村の様子 ─────────
+/** パネルが画面内に収まり、本文が指定の大きさ以上か。中身が多いときは中だけがスクロールできるか。 */
+const layout = (panelSel, textSel, bodySel) =>
+  page.evaluate((p, t, b) => {
+    const e = document.querySelector(p);
+    if (!e) return null;
+    const r = e.getBoundingClientRect();
+    const te = document.querySelector(t);
+    const body = b ? document.querySelector(b) : null;
+    const scrollOk = !body || body.scrollHeight <= body.clientHeight + 2 || ['auto', 'scroll'].includes(getComputedStyle(body).overflowY);
+    return {
+      inView: r.left >= -0.5 && r.top >= -0.5 && r.right <= innerWidth + 0.5 && r.bottom <= innerHeight + 0.5 && r.width > 100,
+      font: te ? parseFloat(getComputedStyle(te).fontSize) : 0,
+      scrollOk,
+      size: `${Math.round(r.width)}x${Math.round(r.height)} / ${innerWidth}x${innerHeight}`,
+    };
+  }, panelSel, textSel, bodySel ?? null);
+const fits = (l, minFont) => !!l && l.inView && l.font >= minFont && l.scrollOk;
+
+// 結果の後（R2）は、サエが伊助の畑に出ている
+const where = await page.evaluate(() => {
+  const g = window.__yui;
+  const sae = g.interaction.interactables.find((i) => i.id === 'sae');
+  return { x: sae.position.x, z: sae.position.z, viewX: g.npcViews.get('sae').root.position.x };
+});
+check('[P3.5] R2 の後、サエは伊助の畑で刈り入れを手伝っている（立ち位置と見た目が移る）', Math.abs(where.x - 37) < 0.01 && Math.abs(where.viewX - 37) < 0.01, JSON.stringify(where));
+await page.evaluate(() => { const g = window.__yui; g.player.x = 34; g.player.z = 14; const o = g.cameraRig.orbit; o.yaw = o.targetYaw = Math.PI; o.pitch = o.targetPitch = 0.3; o.distance = o.targetDistance = 9; });
+await wait(1200);
+await page.screenshot({ path: `${OUT}/shot-40-sae-at-field.png` });
+
+for (const [w, h] of [[1280, 720], [1024, 640]]) {
+  await page.setViewport({ width: w, height: h });
+  await wait(800);
+  const tag = `${w}x${h}`;
+
+  // 会話（サエ：結果の後の台詞）
+  await place(37.0, 12.6, Math.PI);
+  await waitFor((u) => u.target === 'sae');
+  await press('KeyE', (u) => u.dialogueVisible);
+  await page.keyboard.press('Space');
+  await wait(600);
+  const dl = await layout('.dialogue-box', '.dialogue-text', '.dialogue-text');
+  check(`[P3.5] ${tag} 会話：画面に収まり、本文は19px以上`, fits(dl, 19), JSON.stringify(dl));
+  const em = await page.evaluate(() => document.querySelectorAll('.dialogue-text .dialogue-em').length);
+  check(`[P3.5] ${tag} 会話の要点が強調表示される`, em > 0, `強調 ${em} 箇所`);
+  if (w === 1280) await page.screenshot({ path: `${OUT}/shot-41-dialogue-large.png` });
+  await finishDialogue();
+
+  // 手帳
+  await press2('Tab', (s) => s.notebook);
+  await press2('Digit2', (s) => s.activeTab === 'known');
+  const nb = await layout('.notebook', '.notebook-item-summary', '.notebook-body');
+  check(`[P3.5] ${tag} 手帳：画面に収まり、要点は18px以上、長い内容は中でスクロールする`, fits(nb, 18), JSON.stringify(nb));
+  if (w === 1280) await page.screenshot({ path: `${OUT}/shot-42-notebook-large.png` });
+  await press2('Tab', (s) => !s.notebook);
+
+  // 結帳
+  await place(5.8, 12.0, Math.PI);
+  await waitFor((u) => u.target === 'ledger');
+  await press('KeyE', (u) => u.dialogueVisible);
+  await finishDialogue();
+  await waitFor2((s) => s.ledger);
+  const lg2 = await layout('.ledger', '.ledger-item-line', '.ledger-body');
+  check(`[P3.5] ${tag} 結帳：画面に収まり、本文は16px以上`, fits(lg2, 16), JSON.stringify(lg2));
+  await press2('Escape', (s) => !s.ledger);
+
+  // 作業台（決定後の閲覧）
+  await openPlan();
+  const pl = await layout('.plan', '.plan-option', '.plan-body');
+  check(`[P3.5] ${tag} 作業台：画面に収まり、選択肢は16px以上`, fits(pl, 16), JSON.stringify(pl));
+  const fc = await page.evaluate(() => document.querySelectorAll('.plan-forecast .forecast dt').length);
+  check(`[P3.5] ${tag} 作業台に「この案で起きること（見込み）」が4つの観点で出る`, fc === 4, `${fc}`);
+  if (w === 1280) await page.screenshot({ path: `${OUT}/shot-43-plan-decided.png` });
+  await page.keyboard.press('Escape');
+  await waitP3((s) => !s.plan);
+
+  // ポーズ
+  await press2('Escape', (s) => s.pause);
+  const pm = await layout('.pause-layer .menu-panel', '.pause-layer .menu-item');
+  check(`[P3.5] ${tag} ポーズ：画面に収まり、項目は17px以上`, fits(pm, 17), JSON.stringify(pm));
+  await press2('Escape', (s) => !s.pause);
+
+  // 目的表示
+  const ob = await layout('.hud-objective', '.hud-objective-text');
+  check(`[P3.5] ${tag} 目的表示：画面に収まり、17px以上`, fits(ob, 17), JSON.stringify(ob));
+}
+await page.setViewport({ width: 1280, height: 720 });
+await wait(600);
 
 // F3 デバッグ表示
 await page.keyboard.press('F3');

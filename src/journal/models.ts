@@ -9,6 +9,7 @@ import { CONSENT_LABEL, type ConsentStatus, type HouseholdId, type NpcId, type T
  */
 
 export interface TopicHistoryItem {
+  readonly summary: string;
   readonly text: string;
   readonly category: TopicCategory;
   readonly source?: string;
@@ -19,6 +20,9 @@ export interface NotebookTopic {
   readonly title: string;
   readonly personName?: string;
   readonly category: TopicCategory;
+  /** 要点（一句）。定義にないときは見出しを使う。 */
+  readonly summary: string;
+  /** 全文。 */
   readonly text: string;
   readonly source?: string;
   /** 最後に更新された順番（新しい印の判定に使う）。 */
@@ -81,10 +85,12 @@ export function buildTopic(story: StoryState, topic: TopicId, src: JournalSource
     title: def.title,
     ...(def.person ? { personName: src.characters[def.person]?.name ?? def.person } : {}),
     category: current.category,
+    summary: current.summary ?? def.title,
     text: current.text,
     ...(last.source ? { source: last.source } : {}),
     order: last.order,
     history: history.slice(0, -1).map((h) => ({
+      summary: stageDef(h.stage).summary ?? def.title,
       text: stageDef(h.stage).text,
       category: stageDef(h.stage).category,
       ...(h.source ? { source: h.source } : {}),

@@ -40,7 +40,14 @@ import { HOUSEHOLDS, STORY_DEFS } from '../content/story';
 import { LEDGER, LEDGER_NOTE, LEDGER_TITLE } from '../content/ledger';
 import { buildLedger, buildNotebook, type JournalSources } from '../journal/models';
 import { buildOutcome, buildPlanBoard, describePlan, type PlanSources } from '../journal/planModels';
-import { INITIAL_PLAN, OUTCOMES, PLANNING_AVAILABLE, RESPONSE_SUMMARY } from '../content/plan';
+import {
+  INITIAL_PLAN,
+  OUTCOMES,
+  PLANNING_AVAILABLE,
+  RELEVANT_TOPICS,
+  RESPONSE_SUMMARY,
+  forecastPlan,
+} from '../content/plan';
 import { evaluate } from '../story/conditions';
 import { createSave, type SaveFile } from '../save/saveData';
 import { SaveStore, browserStorage } from '../save/SaveStore';
@@ -56,7 +63,8 @@ const PLAN_SOURCES: PlanSources = {
   ...JOURNAL_SOURCES,
   summaries: RESPONSE_SUMMARY,
   outcomes: OUTCOMES,
-  considerationTopics: ['sae.dateReason', 'sae.roof', 'isuke.availability', 'isuke.field', 'isuke.pastHelp'],
+  forecast: forecastPlan,
+  relevantTopics: RELEVANT_TOPICS,
 };
 const NOTEBOOK_TAB_KEYS: ReadonlyArray<[string, NotebookTab]> = [
   ['Digit1', 'people'],
@@ -118,7 +126,7 @@ export class Game {
   constructor(canvasRoot: HTMLElement, hudRoot: HTMLElement) {
     this.hud = new Hud(hudRoot);
     this.prompt = new InteractionPrompt(hudRoot);
-    this.toasts = new Toasts(hudRoot);
+    this.toasts = new Toasts(this.hud.rightColumn);
     this.dialogueBox = new DialogueBox(hudRoot, {
       onAdvance: () => this.advanceDialogue(),
       onChoose: (i) => this.interaction.choose(i),
@@ -131,6 +139,9 @@ export class Game {
     });
     this.planView = new PlanView(hudRoot, {
       onSelect: (item, option) => this.onPlanSelect(item, option),
+      onPick: (plan) => {
+        if (this.uiMode === 'plan') this.story.setPlanDraft(plan);
+      },
       onDecide: () => this.onPlanDecide(),
       onClose: () => this.dispatch('close'),
       onNotebook: () => this.dispatch('openNotebook'),
@@ -199,10 +210,13 @@ export class Game {
     this.events.on('interactionStarted', ({ id }) => this.onInteractionStarted(id));
     this.events.on('interactionEnded', ({ id, cancelled }) => this.onInteractionEnded(id, cancelled));
     this.events.on('flagSet', refreshObjective);
-    this.events.on('topicLearned', ({ topic, previous }) => {
+    this.events.on('topicLearned', ({ topic, stage, previous }) => {
       refreshObjective();
-      const title = STORY_DEFS.topics[topic]?.title ?? topic;
-      this.toasts.push('手帳', previous ? `「${title}」を書き足した` : `「${title}」を書き留めた`);
+      // 通知には要点を出す（何が分かったかが一目で分かるように）
+      const def = STORY_DEFS.topics[topic];
+      const person = def?.person ? `${CHARACTERS[def.person as CharacterId]?.name ?? def.person}：` : '';
+      const summary = def?.stages.find((s) => s.id === stage)?.summary ?? def?.title ?? topic;
+      this.toasts.push(previous ? '手帳を更新' : '手帳に記録', person + summary);
       this.refreshNotebookBadge();
     });
     this.events.on('consentChanged', ({ npc, request, status }) => {
@@ -229,7 +243,7 @@ export class Game {
     });
     this.events.on('storyRestored', () => {
       refreshObjective();
-      this.world.setSaeRoofRenewed(this.story.currentStage('sae.roof') === 'renewed');
+      this.applyOutcomeToWorld();
       this.refreshNotebookBadge();
     });
     this.events.on('areaEntered', ({ location }) => {
@@ -262,7 +276,7 @@ export class Game {
     if (next === 'ledger') this.ledger.show(buildLedger(this.story, this.ledgerEntries(), JOURNAL_SOURCES));
     if (next === 'plan') this.planView.show(buildPlanBoard(this.story, PLAN_SOURCES));
     if (next === 'result') {
-      const outcome = buildOutcome(this.story, OUTCOMES);
+      const outcome = buildOutcome(this.story, OUTCOMES, JOURNAL_SOURCES);
       if (outcome) this.resultView.show(outcome);
     }
     if (next === 'pause') this.pauseMenu.show(this.pauseContent());
@@ -475,9 +489,27 @@ export class Game {
   private decidePlan(): void {
     const outcome = this.story.decidePlan({ source: '作業台で決めた' });
     if (!outcome) return;
-    this.world.setSaeRoofRenewed(true);
+    this.applyOutcomeToWorld();
     this.saveGame();
     this.dispatch('openResult');
+  }
+
+  /**
+   * 決めた計画の結果を村の様子に反映する（屋根の色・はさ掛け・住民の立ち位置と当たり判定）。
+   * 決定前・やり直しのときは元の様子に戻す。
+   */
+  private applyOutcomeToWorld(): void {
+    const outcome = this.story.outcome();
+    const def = outcome ? OUTCOMES[outcome] : undefined;
+    this.world.setSaeRoofRenewed(this.story.currentStage('sae.roof') === 'renewed');
+    this.world.setHarvestDone(def?.harvestDone ?? false);
+    for (const npc of NPCS) {
+      const placement = def?.placements[npc.character] ?? null;
+      this.interaction.setPlacement(npc.id, placement);
+      const p = placement ?? { position: npc.position, heading: npc.heading };
+      this.npcViews.get(npc.id)?.setHome(p.position.x, p.position.z, p.heading, this.world.groundHeight(p.position.x, p.position.z));
+    }
+    this.world.setNpcColliders(npcColliders(this.interaction.interactables.filter((i) => i.kind === 'npc')));
   }
 
   /** 結帳に載せる記録（過去の記録＋決めた計画の結果として書き加えられた記録）。 */

@@ -22,13 +22,35 @@ export class InteractionSystem {
   private targetDef: Interactable | null = null;
   private active: { readonly target: Interactable; readonly runner: DialogueRunner } | null = null;
   private selectedIndex = 0;
+  /** 結果の後など、配置データと違う場所にいる対象（ID → 位置と向き）。 */
+  private readonly overrides = new Map<string, { position: { x: number; z: number }; heading: number }>();
+  private effective: readonly Interactable[];
 
   constructor(
-    readonly interactables: readonly Interactable[],
+    private readonly baseDefs: readonly Interactable[],
     private readonly dialogues: Readonly<Record<string, DialogueScript>>,
     private readonly story: StoryState,
     private readonly events?: EventSink<InteractionEvents>,
-  ) {}
+  ) {
+    this.effective = baseDefs;
+  }
+
+  /** 今の立ち位置を反映した対象の一覧。 */
+  get interactables(): readonly Interactable[] {
+    return this.effective;
+  }
+
+  /** 住民の立ち位置を変える（null で配置データの位置に戻す）。 */
+  setPlacement(id: string, placement: { position: { x: number; z: number }; heading: number } | null): void {
+    if (placement) this.overrides.set(id, placement);
+    else this.overrides.delete(id);
+    this.effective = this.baseDefs.map((d) => {
+      const o = this.overrides.get(d.id);
+      if (!o) return d;
+      return d.kind === 'npc' ? { ...d, position: o.position, heading: o.heading } : { ...d, position: o.position };
+    });
+    if (this.targetDef) this.targetDef = this.effective.find((d) => d.id === this.targetDef!.id) ?? null;
+  }
 
   /** 探索中に操作できる対象（会話中は null）。 */
   get target(): Interactable | null {

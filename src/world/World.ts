@@ -16,7 +16,7 @@ import {
 import { groundHeight, terrainHeight } from './terrain';
 import { createPalette } from './builders/materials';
 import { createGasshoHouse } from './builders/gassho';
-import { createKayaShed, createProp, createWorkshop } from './builders/structures';
+import { createHarvestExtra, createKayaShed, createProp, createWorkshop } from './builders/structures';
 import {
   createBridge,
   createField,
@@ -34,7 +34,11 @@ import { mergeStaticMeshes } from '../render/mergeStatic';
  */
 export class World implements WalkableWorld {
   readonly root = new THREE.Group();
-  readonly colliders: readonly Collider[];
+  private readonly baseColliders: readonly Collider[];
+  private npcColliders: readonly Collider[];
+  private allColliders: readonly Collider[];
+  /** 刈り入れが済んだときに、はさ掛けに足す稲の束。 */
+  private harvestExtra: THREE.Object3D | null = null;
   readonly bounds: Bounds = WALK_BOUNDS;
   readonly locations: readonly LocationDef[] = LOCATIONS;
   /** カメラの壁抜け防止に使うメッシュ。 */
@@ -45,15 +49,32 @@ export class World implements WalkableWorld {
   private readonly freshThatchEdge = new THREE.Color(0x9c8352);
   private oldThatch: THREE.Color[] = [];
 
-  /** @param extraColliders 配置データ以外の障害物（住民の立ち位置など）。 */
-  constructor(extraColliders: readonly Collider[] = []) {
+  /** @param npcColliders 配置データ以外の障害物（住民の立ち位置）。 */
+  constructor(npcColliders: readonly Collider[] = []) {
     this.root.name = 'world';
-    this.colliders = [...buildCollisionMap({ buildings: BUILDINGS, props: PROPS, trees: TREES }), ...extraColliders];
+    this.baseColliders = buildCollisionMap({ buildings: BUILDINGS, props: PROPS, trees: TREES });
+    this.npcColliders = npcColliders;
+    this.allColliders = [...this.baseColliders, ...npcColliders];
     this.build();
     this.root.updateMatrixWorld(true);
     this.root.traverse((obj) => {
       if (obj.userData.cameraBlocker) this.cameraBlockers.push(obj);
     });
+  }
+
+  get colliders(): readonly Collider[] {
+    return this.allColliders;
+  }
+
+  /** 住民の立ち位置が変わったときに、当たり判定を差し替える。 */
+  setNpcColliders(colliders: readonly Collider[]): void {
+    this.npcColliders = colliders;
+    this.allColliders = [...this.baseColliders, ...this.npcColliders];
+  }
+
+  /** 伊助家の刈り入れが済んだ見た目（はさ掛けに稲がすべて掛かる）にする。 */
+  setHarvestDone(done: boolean): void {
+    if (this.harvestExtra) this.harvestExtra.visible = done;
   }
 
   /** サエ家の屋根を、葺き替え前（古い茅）／葺き替え後（新しい茅）の見た目にする。 */
@@ -88,6 +109,10 @@ export class World implements WalkableWorld {
 
     this.root.add(createForest(p, TREES));
     mergeStaticMeshes(this.root);
+    // 結合の後に足す（表示を切り替えるため）
+    this.harvestExtra = createHarvestExtra(p, PROPS.filter((prop) => prop.kind === 'hasaRack'));
+    this.harvestExtra.visible = false;
+    this.root.add(this.harvestExtra);
   }
 
   private createBuilding(p: ReturnType<typeof createPalette>, b: BuildingDef): THREE.Object3D {

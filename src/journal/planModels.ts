@@ -1,5 +1,5 @@
 import type { CharacterDef } from '../content/characters';
-import type { OutcomeDef } from '../content/plan';
+import type { ForecastLine, OutcomeDef } from '../content/plan';
 import { evaluate } from '../story/conditions';
 import type { StoryState } from '../story/StoryState';
 import { CONSENT_LABEL, type ConsentStatus, type PlanPhase, type PlanSpec, type TopicId } from '../story/types';
@@ -7,6 +7,11 @@ import { buildTopic, type JournalSources } from './models';
 
 /**
  * 作業台（計画）と結果画面の表示内容を、ゲーム状態と定義から組み立てる（DOM 非依存）。
+ *
+ * 情報の段階（docs/PHASE3_5_IMPROVEMENT.md「B」）：
+ * 1. 見込み・返事・承諾を得た案（判断の中心）
+ * 2. この案に関わる事情（今の案の選択肢に関係する情報だけ）
+ * 3. 以前の案への返事（開閉式）
  */
 
 export interface PlanOptionView {
@@ -41,18 +46,38 @@ export interface PastResponseView {
   readonly summary?: string;
 }
 
+export interface AgreedPlanView {
+  readonly key: string;
+  readonly plan: PlanSpec;
+  readonly label: string;
+  readonly current: boolean;
+  readonly forecast: readonly ForecastLine[];
+}
+
+export interface ConsiderationView {
+  readonly title: string;
+  /** 要点（一句）。 */
+  readonly summary: string;
+  /** 全文。 */
+  readonly text: string;
+}
+
 export interface PlanBoardModel {
   readonly phase: PlanPhase;
   readonly decided: boolean;
   readonly outcomeTitle?: string;
   readonly items: readonly PlanItemView[];
   readonly invalidReason: string | null;
+  /** この案で起きることの見込み（知っている情報の分だけ見通せる）。 */
+  readonly forecast: readonly ForecastLine[];
   /** 今の案に返事が必要な人と、その返事。 */
   readonly responses: readonly PlanResponseView[];
-  /** 以前の案への返事（比べて考えるため）。新しい順。 */
+  /** 関係者全員の承諾を得た案（見比べて、どれを決めるか選ぶ）。 */
+  readonly agreed: readonly AgreedPlanView[];
+  /** 以前の案への返事（新しい順）。 */
   readonly past: readonly PastResponseView[];
-  /** 判断の材料として、手帳で知っていること。 */
-  readonly considerations: ReadonlyArray<{ readonly title: string; readonly text: string }>;
+  /** 今の案の選択肢に関わる、手帳で知っている事情。 */
+  readonly considerations: readonly ConsiderationView[];
   readonly canDecide: boolean;
 }
 
@@ -66,8 +91,10 @@ export const RESPONSE_LABEL: Record<ResponseState, string> = {
 export interface PlanSources extends JournalSources {
   readonly summaries: Readonly<Record<string, string>>;
   readonly outcomes: Readonly<Record<string, OutcomeDef>>;
-  /** 作業台で「考えておくこと」として並べる情報。 */
-  readonly considerationTopics: readonly TopicId[];
+  /** 案の見込み（content/plan.ts の forecastPlan）。 */
+  readonly forecast: (plan: PlanSpec, story: StoryState) => ForecastLine[];
+  /** 選択肢ごとに関係する情報（項目 ID → 選択肢 ID → 情報 ID）。 */
+  readonly relevantTopics: Readonly<Record<string, Readonly<Record<string, readonly TopicId[]>>>>;
 }
 
 /** 案を短い文で表す（例：「予定日のまま／前日の準備を頼む／伊助家の刈り入れに人を出す」）。 */
@@ -108,6 +135,14 @@ export function buildPlanBoard(story: StoryState, src: PlanSources): PlanBoardMo
   });
 
   const current = draft ? sigOf(draft) : '';
+  const agreed = story.agreedPlans().map((plan) => ({
+    key: sigOf(plan),
+    plan,
+    label: describePlan(story, plan),
+    current: sigOf(plan) === current,
+    forecast: src.forecast(plan, story),
+  }));
+
   const past = story
     .planResponses()
     .filter((r) => sigOf(r.plan) !== current)
@@ -123,10 +158,19 @@ export function buildPlanBoard(story: StoryState, src: PlanSources): PlanBoardMo
       };
     });
 
-  const considerations = src.considerationTopics
+  // 今の案の選択肢に関係する情報だけ（重複なし、知っているものだけ）
+  const topicIds = new Set<TopicId>();
+  if (draft) {
+    for (const item of planning.items) for (const t of src.relevantTopics[item.id]?.[draft[item.id] ?? ''] ?? []) topicIds.add(t);
+  }
+  const considerations = [...topicIds]
     .map((t) => buildTopic(story, t, src))
     .filter((t) => t !== null)
-    .map((t) => ({ title: t.personName ? `${t.personName}｜${t.title}` : t.title, text: t.text }));
+    .map((t) => ({
+      title: t.personName ? `${t.personName}｜${t.title}` : t.title,
+      summary: t.summary,
+      text: t.text,
+    }));
 
   const outcomeTitle = decision ? src.outcomes[decision.outcome]?.title : undefined;
   return {
@@ -135,7 +179,9 @@ export function buildPlanBoard(story: StoryState, src: PlanSources): PlanBoardMo
     ...(outcomeTitle ? { outcomeTitle } : {}),
     items,
     invalidReason: draft ? planning.invalidReason(draft) : null,
+    forecast: draft ? src.forecast(draft, story) : [],
     responses,
+    agreed,
     past,
     considerations,
     canDecide: story.planPhase() === 'ready',
@@ -147,21 +193,43 @@ export function buildPlanBoard(story: StoryState, src: PlanSources): PlanBoardMo
 export interface OutcomeView {
   readonly title: string;
   readonly when: string;
-  readonly plan: string;
+  /** 自分が決めたこと。 */
+  readonly decided: { readonly plan: string; readonly agreedBy: string };
   readonly story: readonly string[];
-  readonly changes: ReadonlyArray<{ readonly label: string; readonly text: string }>;
+  /** その判断によって実現したこと。 */
+  readonly achieved: readonly string[];
+  /** その代わりに残った負担や約束。 */
+  readonly costs: readonly string[];
+  /** 承諾を得ていたが選ばなかった案。 */
+  readonly notChosen: ReadonlyArray<{ readonly plan: string; readonly tagline: string }>;
 }
 
 /** 決定した計画の結果。知っていた情報によって文章が変わる。 */
-export function buildOutcome(story: StoryState, outcomes: Readonly<Record<string, OutcomeDef>>): OutcomeView | null {
+export function buildOutcome(story: StoryState, outcomes: Readonly<Record<string, OutcomeDef>>, src?: JournalSources): OutcomeView | null {
   const decision = story.planDecision();
   const def = decision ? outcomes[decision.outcome] : undefined;
-  if (!decision || !def) return null;
+  const planning = story.defs.planning;
+  if (!decision || !def || !planning) return null;
+  const shown = (lines: OutcomeDef['story']) => lines.filter((l) => evaluate(l.when, story)).map((l) => l.text);
+  const nameOf = (npc: string) => (src?.characters[npc] as CharacterDef | undefined)?.name ?? npc;
+  const sig = story.planSignature(decision.plan);
+  const notChosen = story
+    .agreedPlans()
+    .filter((p) => story.planSignature(p) !== sig)
+    .map((p) => {
+      const id = planning.outcome(p);
+      return { plan: describePlan(story, p), tagline: (id && outcomes[id]?.tagline) || '' };
+    });
   return {
     title: def.title,
     when: def.when,
-    plan: describePlan(story, decision.plan),
-    story: def.story.filter((l) => evaluate(l.when, story)).map((l) => l.text),
-    changes: def.changes,
+    decided: {
+      plan: describePlan(story, decision.plan),
+      agreedBy: planning.involved(decision.plan).map(nameOf).join('・'),
+    },
+    story: shown(def.story),
+    achieved: shown(def.achieved),
+    costs: shown(def.costs),
+    notChosen,
   };
 }

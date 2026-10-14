@@ -2,9 +2,9 @@ import { el } from './dom';
 
 /**
  * 手帳の更新などを知らせる短い通知（右上の目的表示の下）。
- * 同時に出すのは最大3件。古いものから消える。
+ * 同時に出すのは最大2件。古いものから消える。
  */
-const MAX_VISIBLE = 3;
+const MAX_VISIBLE = 2;
 const DURATION_MS = 3200;
 
 export class Toasts {

@@ -65,8 +65,9 @@ export class LedgerView {
         sec.append(row);
       }
       if (entry.related.length > 0) {
-        const now = el('div', 'ledger-now ledger-related');
-        now.append(el('div', 'ledger-now-label', '関連して今わかっていること（手帳より）'));
+        // 詳しく読みたい人向け（開閉式）
+        const now = el('details', 'ledger-now ledger-related');
+        now.append(el('summary', 'ledger-now-label', `関連して今わかっていること（手帳より・${entry.related.length}）`));
         entry.related.forEach((r) => now.append(el('div', undefined, `${r.title}：${r.text}`)));
         sec.append(now);
       }

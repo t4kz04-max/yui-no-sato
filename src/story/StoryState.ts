@@ -303,6 +303,26 @@ export class StoryState implements StoryQuery {
     return response;
   }
 
+  /**
+   * 関係者全員の承諾を得た案（古い順・重複なし）。作業台で並べて見比べ、どれを決めるか選ぶために使う。
+   * 承諾は案ごとに記録されているので、案を変えても失われない。
+   */
+  agreedPlans(): PlanSpec[] {
+    const planning = this.defs.planning;
+    if (!planning) return [];
+    const seen = new Set<string>();
+    const list: PlanSpec[] = [];
+    for (const r of this.responses) {
+      const sig = this.planSignature(r.plan);
+      if (seen.has(sig)) continue;
+      seen.add(sig);
+      if (planning.invalidReason(r.plan) !== null) continue;
+      const ok = planning.involved(r.plan).every((npc) => this.planResponse(npc, r.plan)?.status === 'agreed');
+      if (ok) list.push(r.plan);
+    }
+    return list;
+  }
+
   /** 関係者全員が今の案を承諾していれば決定し、結果の効果を適用する。決定できなければ null。 */
   decidePlan(ctx: EffectContext = {}): string | null {
     const planning = this.requirePlanning();

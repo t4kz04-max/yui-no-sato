@@ -22,13 +22,15 @@ export class Hud {
   private readonly objectiveTextEl: HTMLElement;
   private readonly areaEl: HTMLElement;
   private readonly notebookBadgeEl: HTMLElement;
+  /** 右上の縦の並び（目的・手帳の新着・通知）。重ならないように一つの列に積む。 */
+  readonly rightColumn: HTMLElement;
   private debugVisible = false;
   private areaTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(private readonly root: HTMLElement) {
     root.innerHTML = '';
     const title = el('div', 'hud-title');
-    title.innerHTML = '<span class="hud-title-main">結の約束</span><span class="hud-title-sub">（仮）開発版 Phase 3</span>';
+    title.innerHTML = '<span class="hud-title-main">結の約束</span><span class="hud-title-sub">（仮）開発版 Phase 3.5</span>';
 
     this.helpEl = el('div', 'hud-help');
     this.helpEl.innerHTML = [
@@ -62,7 +64,9 @@ export class Hud {
     this.debugEl = el('div', 'hud-debug');
     this.debugEl.hidden = true;
 
-    root.append(title, this.objectiveEl, this.notebookBadgeEl, this.areaEl, this.helpEl, this.debugEl);
+    this.rightColumn = el('div', 'hud-right');
+    this.rightColumn.append(this.objectiveEl, this.notebookBadgeEl);
+    root.append(title, this.rightColumn, this.areaEl, this.helpEl, this.debugEl);
   }
 
   toggleDebug(): void {

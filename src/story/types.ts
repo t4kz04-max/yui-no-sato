@@ -20,7 +20,9 @@ export type TopicCategory = 'known' | 'unconfirmed';
 export interface TopicStageDef {
   readonly id: StageId;
   readonly category: TopicCategory;
-  /** 手帳に載せる記述。 */
+  /** 要点（短い一句）。手帳・作業台・通知で最初に見せる。 */
+  readonly summary?: string;
+  /** 手帳に載せる記述（全文）。 */
   readonly text: string;
 }
 

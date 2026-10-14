@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { BUILDING_FOOTPRINT, type PropKind } from '../layout';
+import { BUILDING_FOOTPRINT, type PropDef, type PropKind } from '../layout';
+import { terrainHeight } from '../terrain';
 import { markCameraBlocker, shadowed, type Palette } from './materials';
 
 /** 切妻の板屋根（作業場・小屋用）。 */
@@ -93,6 +94,29 @@ export function createKayaShed(p: Palette): THREE.Group {
   const stack = kayaStack(p, 7, 4, fp.halfWidth * 2 - 0.8);
   g.add(stack);
   return g;
+}
+
+/**
+ * 刈り入れが済んだときに、はさ掛けの空いている段に足す稲の束（表示の切り替え用に結合しない）。
+ * createProp の hasaRack と同じ並びで、上下の段を入れ替えた位置に置く。
+ */
+export function createHarvestExtra(p: Palette, racks: readonly PropDef[]): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'harvest-extra';
+  const sheafGeo = new THREE.BoxGeometry(0.35, 0.9, 0.3);
+  for (const rack of racks) {
+    const g = new THREE.Group();
+    for (let i = 0; i < 16; i++) {
+      const sheaf = shadowed(new THREE.Mesh(sheafGeo, p.crop));
+      sheaf.position.set(-2.8 + i * 0.37, i % 2 === 0 ? 1.55 : 0.85, 0.04);
+      g.add(sheaf);
+    }
+    g.position.set(rack.position.x, terrainHeight(rack.position.x, rack.position.z), rack.position.z);
+    g.rotation.y = rack.rotation;
+    g.scale.setScalar(rack.scale ?? 1);
+    group.add(g);
+  }
+  return group;
 }
 
 /** 小物。寸法は layout.ts の PROP_FOOTPRINT と対応する。 */

@@ -158,11 +158,11 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
       },
       epiR2: {
         speaker: 'toki',
-        lines: ['前の日の伊助さん、すごく手際がよかったよ。', '今度はサエさんの家が刈り入れを手伝う番だね。約束、忘れないようにしないと。'],
+        lines: ['サエさん、伊助さんの田んぼに出てるよ。', '屋根葺きの次の日からだもの、大変だよね。約束って、こういうことなんだね。'],
       },
       epiR3: {
         speaker: 'toki',
-        lines: ['待った分、屋根は傷んじゃったけど、みんなそろって葺けたね。', 'どっちがよかったのかは、ぼくにも分からないや。'],
+        lines: ['伊助さん、サエさんの家に来てるよ。刈り入れが済んで、ほっとしてるみたい。', '屋根は傷んじゃったけど……どっちがよかったのかは、ぼくにも分からないや。'],
       },
     },
   },
@@ -182,7 +182,7 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
         speaker: 'sae',
         lines: [
           'あら、あなたが相談役を引き受けてくれたのね。',
-          '屋根の葺き替え、日取りはもう決めてあるの。でも、手伝ってもらえる人がなかなか揃わなくて……。',
+          '屋根の葺き替え、日取りはもう決めてあるの。でも、**手伝ってもらえる人がなかなか揃わなくて**……。',
         ],
         effects: [learn('sae.schedule', 'needsHelp')],
         choices: [{ text: '誰に声をかければいいですか？', next: 'who' }, ...SAE_TOPICS, { text: '行ってきます' }],
@@ -204,14 +204,14 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
       },
       roofWorry: {
         speaker: 'sae',
-        lines: ['ええ……。今年のうちに葺き替えないと、傷みが中まで進んでしまうの。', 'だから、日取りはできるだけ延ばしたくないのよ。'],
+        lines: ['ええ……。今年のうちに葺き替えないと、**傷みが中まで進んでしまう**の。', 'だから、日取りはできるだけ延ばしたくないのよ。'],
         effects: [learn('sae.dateReason', 'roofWorry')],
         next: 'more',
       },
       burden: {
         speaker: 'sae',
         lines: [
-          '……そうなの。うちはまだ返せていない。',
+          '……そうなの。**うちはまだ返せていない**。',
           '屋根は急ぎたい。でも、そのせいでまた誰かに無理をさせるのは、気が重いのよ。',
         ],
         effects: [learn('sae.dateReason', 'burden')],
@@ -258,19 +258,22 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
       },
       reNoIsuke: {
         speaker: 'sae',
-        lines: ['伊助さんに無理を言わずに済むなら、それがいいのかもしれない。', '人手は少ないけれど、うちの者と村の人たちで、なんとかするわ。'],
+        lines: ['伊助さんに無理を言わずに済むなら、それがいいのかもしれない。', '**人手が少ないから、二日はかかる**わね。うちの者と村の人たちで、なんとかするわ。'],
       },
       reRelies: {
         speaker: 'sae',
         lines: [
           '……また伊助さんに頼ることになるのね。',
-          'うちは十二年前の分も、まだ返せていないのに。……でも、あなたがそう考えたのなら、それでいいわ。',
+          '**うちは十二年前の分も、まだ返せていないのに**。……でも、あなたがそう考えたのなら、それでいいわ。',
         ],
         effects: [learn('isuke.pastHelp', 'onRecord'), learn('sae.dateReason', 'burden')],
       },
       reWithReturn: {
         speaker: 'sae',
-        lines: ['伊助さんの刈り入れに、うちからも人を出すのね。', 'うちも楽ではないけれど、頼むだけというのは気が引けるもの。それでいきましょう。'],
+        lines: [
+          '伊助さんの刈り入れに、うちからも人を出すのね。',
+          '**屋根葺きのすぐ後だから、うちの者にはこたえる**けれど……頼むだけというのは気が引けるもの。それでいきましょう。',
+        ],
         effects: [learn('sae.dateReason', 'burden')],
       },
       reDelayNo: {
@@ -280,27 +283,27 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
       },
       reDelayWorry: {
         speaker: 'sae',
-        lines: ['刈り入れの後まで延ばすのね……。', '待てば傷みは進む。それでも、伊助さんが来てくれるなら……分かったわ。'],
+        lines: ['刈り入れの後まで延ばすのね……。', '**待てば傷みは進む**。それでも、伊助さんが来てくれるなら……分かったわ。'],
         effects: [learn('sae.dateReason', 'roofWorry')],
       },
       reDelayReturn: {
         speaker: 'sae',
-        lines: ['延ばして、待つあいだに伊助さんの刈り入れを手伝うのね。', '傷みは心配だけれど、そのほうが筋が通る気がする。やってみましょう。'],
+        lines: ['延ばして、待つあいだに伊助さんの刈り入れを手伝うのね。', '**うちの屋根は後回し**ね……。でも、そのほうが筋が通る気がする。やってみましょう。'],
         effects: [learn('sae.dateReason', 'burden')],
       },
 
       // 結果の後
       epiR1: {
         speaker: 'sae',
-        lines: ['屋根、葺き上がったわ。二日がかりだったけれど。', '伊助さんに無理を言わずに済んだのは、よかったのかしらね。'],
+        lines: ['屋根、葺き上がったわ。**二日がかり**で、みんなくたくたよ。', 'でも、伊助さんに無理を言わずに済んだのは、よかったのかしらね。'],
       },
       epiR2: {
         speaker: 'sae',
-        lines: ['一日で葺き上がったの。伊助さんの前の日の手伝いのおかげね。', '今度はうちが刈り入れを手伝う番。約束は守らないと。'],
+        lines: ['今日は伊助さんの田んぼの手伝いよ。**約束だもの**。', '屋根葺きの疲れが抜けないうちだから、正直こたえるわ。……でも、屋根は一日で葺けたのよ。'],
       },
       epiR3: {
         speaker: 'sae',
-        lines: ['待った分、傷んだところも多かったけれど……みんなで葺けたわ。', 'これでよかったのか、ときどき考えるの。'],
+        lines: ['待った分、**傷んだところも多かった**けれど……みんなで葺けたわ。', 'これでよかったのか、ときどき考えるの。'],
       },
     },
   },
@@ -321,7 +324,7 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
     nodes: {
       first: {
         speaker: 'isuke',
-        lines: ['屋根葺きの手伝い？ ……悪いが、その日は無理だ。'],
+        lines: ['屋根葺きの手伝い？ ……悪いが、**その日は無理だ**。'],
         effects: [
           learn('isuke.availability', 'declined'),
           setConsent('isuke', 'roofDay', 'declined', '当日は手伝えない'),
@@ -340,8 +343,8 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
       harvest: {
         speaker: 'isuke',
         lines: [
-          '……見たのか。ちょうど稲の刈り入れが重なっていてな。',
-          '天気のいいうちに刈って掛けてしまわんと、うちの一年の米が駄目になる。屋根の日にここを空けるわけにはいかん。',
+          '……見たのか。**ちょうど稲の刈り入れが重なっていてな**。',
+          '天気のいいうちに刈って掛けんと、一年の米が駄目になる。屋根の日に、ここは空けられん。',
         ],
         next: 'harvestNote',
       },
@@ -351,14 +354,14 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
       },
       dayBefore: {
         speaker: 'isuke',
-        lines: ['……前の日の半日くらいなら、抜けられんこともない。', 'だが、その分刈り入れは遅れる。遅れをどうするか、だな。'],
+        lines: ['……**前の日の半日くらいなら、抜けられんこともない**。', 'だが、その分刈り入れは遅れる。遅れをどうするか、だな。'],
         effects: [learn('isuke.availability', 'dayBefore')],
       },
       pastHelp: {
         speaker: 'isuke',
         lines: [
           '十二年前……ああ、サエさんの家の時か。確かに手伝いに出た。',
-          'だがな、昔手伝ったからといって、今年の刈り入れが待ってくれるわけじゃない。返してもらうのは、いずれうちの屋根の時でいい。',
+          'だがな、**昔手伝ったからといって、今年の刈り入れが待ってくれるわけじゃない**。返してもらうのは、いずれうちの屋根の時でいい。',
         ],
         effects: [learn('isuke.pastHelp', 'isukeView')],
       },
@@ -400,7 +403,7 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
       },
       reConflictKnown: {
         speaker: 'isuke',
-        lines: ['刈り入れの日に屋根には上がれん。それは前にも話したはずだ。', '日取りか、頼み方か……どちらかを変えてくれんと、どうにもならん。'],
+        lines: ['刈り入れの日に屋根には上がれん。それは前にも話したはずだ。', '**日取りか、頼み方か**……どちらかを変えてくれんと、どうにもならん。'],
       },
       reConflict: {
         speaker: 'isuke',
@@ -410,7 +413,7 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
         speaker: 'isuke',
         lines: [
           '前の日の半日か……。抜けられんことはない。',
-          'だが、その分刈り入れが遅れる。遅れた分をどうするのか。そこが決まらんうちは、うんとは言えん。',
+          'だが、その分刈り入れが遅れる。**遅れた分をどうするのか**。そこが決まらんうちは、うんとは言えん。',
         ],
       },
       rePrepOk: {
@@ -433,7 +436,7 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
       // 結果の後
       epiR1: {
         speaker: 'isuke',
-        lines: ['屋根、葺き上がったな。……うちは刈り入れで手一杯だった。', '手伝えんで悪かったとは思っとる。だが、あれでよかったんだろう。'],
+        lines: ['屋根、葺き上がったな。……うちは刈り入れで手一杯だった。', '**二日がかりだったそうだな**。手伝えんで悪かったとは思っとる。'],
       },
       epiR1Unasked: {
         speaker: 'isuke',
@@ -441,15 +444,15 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
       },
       epiR2: {
         speaker: 'isuke',
-        lines: ['前の日の分は、刈り入れを手伝ってもらうことで話がついとる。', '約束は約束だ。頼んだぞ。'],
+        lines: ['サエさんが手伝いに来てくれとる。**約束は約束だ**。', '前の日に抜けた分は、これで取り戻せそうだ。'],
       },
       epiR3: {
         speaker: 'isuke',
-        lines: ['待たせたな。屋根の上は久しぶりだったが、悪くなかった。', '……だが、サエさんの屋根、思ったより傷んどったな。'],
+        lines: ['刈り入れが済んだんで、屋根を見に来た。', '待たせた分、**思ったより傷んどった**な。……それでも、屋根に上がれてよかった。'],
       },
       epiR3help: {
         speaker: 'isuke',
-        lines: ['刈り入れを手伝ってもらって助かった。おかげで早く片づいた。', '屋根の日に出られてよかったよ。'],
+        lines: ['刈り入れを手伝ってもらって、早く片づいた。', '屋根の日に上がれてよかったよ。**この秋の手の出し合いは、どう書き留めたもんかな**。'],
       },
     },
   },
@@ -595,6 +598,7 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
   hasaRack: {
     id: 'hasaRack',
     entries: [
+      { when: outcomeIs('r3', 'r3help'), node: 'done' },
       { when: all(knows('isuke.availability', 'harvest'), notYet('isuke.field', 'progress')), node: 'closer' },
       { when: flag('inspected:hasaRack'), node: 'again' },
       { node: 'first' },
@@ -610,11 +614,12 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
       closer: {
         lines: [
           'はさの向こうに、刈り取りを待つ田がまだ広がっている。',
-          '伊助さんひとりでは、あと十日はかかりそうだ。人手があれば、もっと早く済むかもしれない。',
+          '伊助さんひとりでは、**あと十日はかかりそうだ**。人手があれば、もっと早く済むかもしれない。',
         ],
         effects: [learn('isuke.field', 'progress')],
       },
       again: { lines: ['稲の束が掛けられた柵。刈り入れはまだ続くようだ。'] },
+      done: { lines: ['はさ掛けに、稲がすべて掛け終わっている。刈り入れは済んだようだ。'] },
     },
   },
   kayaBundles: {

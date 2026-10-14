@@ -132,16 +132,18 @@ export class NotebookView {
   private topicItem(t: NotebookTopic, showPerson: boolean): HTMLElement {
     const item = el('div', `notebook-item is-${t.category}`);
     item.dataset.topic = t.topic;
+    // 1 見出し → 2 要点（大きく） → 3 全文 → 4 入手元とこれまでの記録（開閉式）
     const title = el('div', 'notebook-item-title', showPerson && t.personName ? `${t.personName}｜${t.title}` : t.title);
     if (this.isNew(t)) title.append(el('span', 'badge-new', t.history.length > 0 ? '更新' : '新'));
-    item.append(title, el('div', 'notebook-item-text', t.text));
-    if (t.source) item.append(el('div', 'notebook-item-source', `（${t.source}）`));
-    if (t.history.length > 0) {
+    item.append(title, el('div', 'notebook-item-summary', t.summary), el('div', 'notebook-item-text', t.text));
+    if (t.source || t.history.length > 0) {
       const details = el('details', 'notebook-history');
-      details.append(el('summary', undefined, `これまでの記録（${t.history.length}）`));
+      details.append(el('summary', undefined, t.history.length > 0 ? `どこで知ったか・これまでの記録（${t.history.length}）` : 'どこで知ったか'));
+      if (t.source) details.append(el('div', 'notebook-item-source', `いまの記述：${t.source}`));
       const list = el('ol');
       t.history.forEach((h) => {
-        const li = el('li', `is-${h.category}`, h.text);
+        const li = el('li', `is-${h.category}`);
+        li.append(el('div', 'notebook-history-summary', h.summary), el('div', 'notebook-history-text', h.text));
         if (h.source) li.append(el('span', 'notebook-item-source', `（${h.source}）`));
         list.append(li);
       });
