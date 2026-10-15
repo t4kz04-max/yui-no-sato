@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Collider } from '../core/collision';
 import { dampAngle, type Vec2 } from '../core/math';
 import { Figure } from '../characters/Figure';
+import { disposePersonRig } from '../characters/personRig';
 import type { PersonAppearance } from '../characters/personRig';
 import { CREW_RADIUS, roofDayColliders, type CrewMember, type RoofDayStage } from '../content/staging';
 import { createKayaPile, createLadder } from './builders/structures';
@@ -115,8 +116,10 @@ export class RoofDayScene {
   }
 
   private clear(): void {
-    // ジオメトリはこの場面だけのものなので捨てる（マテリアルは村・人物で共有しているので残す）
-    this.root.traverse((o) => {
+    // この場面だけの物を捨てる：作業員の骨（Skeleton）と体・持ち物の形、足場・梯子・茅の山の形（レビュー指摘 6）。
+    // マテリアルと、人物で共有する足元の影の形は、村・住民でも使うので残す
+    for (const f of this.figures) disposePersonRig(f.rig);
+    this.props.traverse((o) => {
       if (o instanceof THREE.Mesh) o.geometry.dispose();
     });
     for (const child of [...this.root.children]) this.root.remove(child);

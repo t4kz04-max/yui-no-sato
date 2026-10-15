@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Phase 7（初回改善）— 第三者プレイテストの評価と修正：**実装完了（ユーザーの確認待ち。この後に別のコードレビュー。Phase 8 以降には進まない）**
+Phase 7（初回改善＋最終品質改善）— 第三者プレイテストの評価と修正、独立コードレビューの指摘 8 件の修正：**実装完了（ユーザーの確認待ち。完了扱いにしない。Phase 8 以降には進まない）**
 
 - Phase 0〜3：完了（2026-10-14）
 - Phase 3.5（試遊フィードバックに基づく改善）：完了（2026-10-14）
@@ -23,12 +23,39 @@ npm run typecheck      # TypeScript 型チェック
 npm test               # 自動テスト（Vitest）
 npm run build          # 型チェック＋本番ビルド（dist/）
 npm run preview        # 本番ビルドの確認 → http://localhost:4173/
-npm run test:browser   # ヘッドレス Chrome によるブラウザ動作確認（Chrome 必須、約15分）
+npm run test:browser   # ヘッドレス Chrome によるブラウザ動作確認（Chrome 必須、約20分。再開の確認を含む）
 npm run shots          # 見た目の確認用の撮影と描画負荷の計測 → test-results/shots-latest/
-npm run check          # 型チェック＋自動テスト＋本番ビルド
+npm run check          # 型チェック＋自動テスト＋本番ビルド＋出力物の検査
 ```
 
 GPU で描画負荷を測るとき：`$env:GPU="1"; npm run shots`（垂直同期を外して FPS を測る）。
+
+## Phase 7 最終品質改善（2026-10-15）：独立コードレビューの指摘 8 件
+
+**指摘ごとの再現・修正・判断・結果：`docs/PHASE7_PLAN.md` §7**。基準はコミット 54cbb64。保存の形式は変えていない。
+
+### Completed
+- **1 Critical 結果画面での再読み込み**：保存された状態から結果画面を戻す（全 8 案で確認）。
+- **2 通知の消失**：表示待ちの列（順序を保つ・重複なし・上限 12 件）。表示時間は実時間で数える。
+- **3 結帳と第3幕の矛盾**：十五年前の伊助の手伝いを「屋根の上で茅を葺く。茅運びも」に統一（判断の理由は §7.1）。
+- **4 E1 の新しい約束**：状態から導き、手帳・結帳・記録・エンディングに出す。
+- **5 音楽の予約**：遅れた音は追いかけず、1 回の更新で 4 音まで（`src/audio/musicScheduler.ts`）。
+- **6 Skeleton の破棄**：`disposePersonRig`。作り直しでテクスチャ数は 21 のまま。
+- **7 ライセンス表記**：ビルドで `dist/THIRD_PARTY_LICENSES.txt` を出力し、`scripts/check-dist.mjs` で検査。
+- **8 結帳の予定と実績**：屋根葺きの日を終えるまでは「予定」として記す。
+
+### Test Results（2026-10-15 実行）
+
+| 種類 | 内容 | 結果 |
+|---|---|---|
+| Build Verified | `npm run check`（型チェック・単体テスト・本番ビルド・出力物の検査） | 成功 |
+| Automated Test Verified | 単体テスト 18 ファイル（34 件追加） | **389/389 成功** |
+| Automated Test Verified | `npm run test:browser`（再開・資源・通知の 30 項目を追加） | **220/220 成功**、コンソールのエラー・警告 0 件 |
+| Automated Test Verified | `GPU=1 npm run shots` | 初回改善と同じ範囲（PHASE7_PLAN §7.3） |
+| Manual Test Verified | 実際に遊んでの確認 | **未実施（ユーザーの確認待ち）** |
+
+### Known Issues
+- PHASE7_PLAN §7.4。
 
 ## Phase 7 初回改善（2026-10-15）：第三者プレイテストの評価と修正
 

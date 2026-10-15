@@ -32,7 +32,16 @@ export function ledgerEntries(story: StoryState): LedgerEntry[] {
   }
 
   const act1 = roof ? OUTCOMES[roof.outcome] : undefined;
-  if (act1) {
+  // 屋根葺きの日を終えるまでは、実際の人数・日数はまだ分からないので「予定」として記す（レビュー指摘 8）
+  const planned = story.chapter === 'roofDay' && !story.has('roofDay:ended');
+  if (act1 && planned) {
+    entries.push({
+      ...act1.ledger,
+      when: `${act1.ledger.when}（予定）`,
+      title: `${act1.ledger.title}　※作業の日を終えたら、実際の手伝いを記す`,
+      items: act1.ledger.items.map((i) => ({ ...i, detail: `予定：${i.detail}` })),
+    });
+  } else if (act1) {
     const o = parseOutcomeId(act1.id);
     entries.push({
       ...act1.ledger,
@@ -176,3 +185,27 @@ export const EXPLAIN: ExplainContent = {
     'サエ家の室内は、資料の一般的な間取りを参考にした創作で、特定の家の再現ではない。',
   ],
 };
+
+/** 第1幕で手持ちの茅（一部だけ葺く）を選び、第3幕で E1 になったときに成立する約束の ID。 */
+export const PROMISE_ISUKE_HELPS_SAE_REST = 'isukeHelpsSaeRest';
+
+/**
+ * 状態から導く約束（保存データには持たない。終了済みの古い記録でも同じに表示できる。レビュー指摘 4）。
+ * E1 で「サエ家の屋根の残りを葺くときは、伊助家が手を貸す」と話がついた（第1幕で手持ちの茅を選んだ場合だけ。
+ * 結末の文章 ENDINGS.e1 と同じ条件）。まだ果たしていない約束として出す。
+ */
+export function derivedPromises(story: StoryState): Array<{ id: string; from: string; to: string; content: string; source: string }> {
+  const roof = story.planDecision('roof');
+  const isukeRoof = story.planDecision('isukeRoof');
+  const part = roof ? parseOutcomeId(roof.outcome)?.full === false : false;
+  if (isukeRoof?.outcome !== 'e1' || !part) return [];
+  return [
+    {
+      id: PROMISE_ISUKE_HELPS_SAE_REST,
+      from: 'isuke',
+      to: 'sae',
+      content: 'サエ家の屋根の残りを葺くときは、伊助家が手を貸す',
+      source: '伊助家の屋根葺きの日に話がついた',
+    },
+  ];
+}

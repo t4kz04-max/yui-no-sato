@@ -6,14 +6,14 @@
   "description": "結の約束（仮）— 白川郷の「結」を題材にしたブラウザ向け短編3D探索アドベンチャー",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && node scripts/check-dist.mjs",
     "preview": "vite preview",
-    "test:browser": "node scripts/browser-check.mjs",
+    "test:browser": "node scripts/browser-check.mjs && node scripts/browser-resume.mjs",
     "shots": "node scripts/visual-shots.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "tsc --noEmit && vitest run && vite build"
+    "check": "tsc --noEmit && vitest run && vite build && node scripts/check-dist.mjs"
   },
   "dependencies": {
     "three": "^0.186.1"

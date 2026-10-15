@@ -1,4 +1,5 @@
 import type { AmbientMix, MusicMood, Surface } from './mix';
+import { scheduleMusic } from './musicScheduler';
 
 /**
  * 音（Web Audio API で、その場で合成する。外部の音声ファイルは使わない）。
@@ -153,16 +154,11 @@ export class AudioEngine {
 
     if (this.mood !== 'none') {
       const m = MOODS[this.mood];
-      while (this.nextNote < ahead) {
-        if (this.phraseLeft <= 0) {
-          this.phraseLeft = Math.round(rand(m.phrase[0], m.phrase[1]));
-          this.nextNote += rand(m.rest[0], m.rest[1]);
-          continue;
-        }
-        this.musicNote(m, Math.max(now, this.nextNote));
-        this.phraseLeft--;
-        this.nextNote += rand(m.gap[0], m.gap[1]);
-      }
+      // 長く止まった後に過去の音をまとめて鳴らさない・1 回に予約する音数に上限（musicScheduler.ts。レビュー指摘 5）
+      const clock = { nextNote: this.nextNote, phraseLeft: this.phraseLeft };
+      for (const t of scheduleMusic(clock, now, ahead, m, Math.random)) this.musicNote(m, t);
+      this.nextNote = clock.nextNote;
+      this.phraseLeft = clock.phraseLeft;
     }
     if (this.nextGust < ahead) {
       // 風はゆっくり強弱をつける（単調にならないように）

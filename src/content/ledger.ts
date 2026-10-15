@@ -59,7 +59,8 @@ export const LEDGER: readonly LedgerEntry[] = [
         from: 'isuke',
         to: 'sae',
         kind: 'labor',
-        detail: '二人・二日（茅運び、下の仕事）',
+        // 第3幕の「記録どおり、屋根の上の仕事」と合わせる（伊助家は屋根の上で茅を葺いた。レビュー指摘 3）
+        detail: '二人・二日（屋根の上で茅を葺く。茅運びも）',
         settlement: 'open',
         settlementNote: 'まだ返していない。伊助家の屋根葺きの折に返す。',
       },

@@ -98,6 +98,8 @@ function contactShadow(): THREE.Mesh {
   };
   const m = new THREE.Mesh(sharedShadow.geo, sharedShadow.mat);
   m.name = 'contact-shadow';
+  // 全員で共有する形と材質（人物を片付けるときに捨てない。レビュー指摘 6）
+  m.userData.shared = true;
   m.position.y = 0.02;
   m.renderOrder = 1;
   return m;
@@ -575,4 +577,15 @@ export function applyFace(rig: PersonRig, f: FaceState): void {
   rig.eyes.scale.set(1, Math.max(0.08, 1 - f.blink), 1);
   rig.mouth.scale.set(1 - f.mouth * 0.25, 1 + f.mouth * 2.6, 1);
   rig.brows.position.y = 0.335 + f.brow * 0.018;
+}
+
+/**
+ * 人物が持つ GPU の資源を捨てる（レビュー指摘 6）：骨（Skeleton。骨の行列のテクスチャを持つ）、体と持ち物のジオメトリ。
+ * 全員で共有する材質・足元の影の形は捨てない。二度呼んでも問題ない。
+ */
+export function disposePersonRig(rig: PersonRig): void {
+  rig.mesh.skeleton.dispose();
+  rig.root.traverse((o) => {
+    if (o instanceof THREE.Mesh && !o.userData.shared) o.geometry.dispose();
+  });
 }

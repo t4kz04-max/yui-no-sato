@@ -73,6 +73,11 @@ export interface JournalSources {
   /** 計画への返事の要旨（理由 ID → 文）。 */
   readonly planSummaries?: Readonly<Record<string, string>>;
   readonly households: Readonly<Record<HouseholdId, { readonly name: string; readonly person?: string }>>;
+  /**
+   * 状態から導く約束（結末で成立した約束など。保存データには持たない。レビュー指摘 4）。
+   * 保存されている約束と同じ id のものがあれば重ねない。
+   */
+  readonly derivedPromises?: (story: StoryState) => ReadonlyArray<{ readonly id: string; readonly from: HouseholdId; readonly to: HouseholdId; readonly content: string; readonly source?: string }>;
 }
 
 export function buildTopic(story: StoryState, topic: TopicId, src: JournalSources): NotebookTopic | null {
@@ -141,7 +146,9 @@ export function buildNotebook(story: StoryState, src: JournalSources): NotebookM
       };
     });
 
-  const promises = story.allPromises().map((p) => ({
+  const stored = story.allPromises();
+  const derived = (src.derivedPromises?.(story) ?? []).filter((d) => !stored.some((p) => p.id === d.id));
+  const promises = [...stored, ...derived].map((p) => ({
     content: p.content,
     kept: story.has(`kept:${p.id}`),
     from: src.households[p.from]?.name ?? p.from,

@@ -53,7 +53,7 @@ import {
   act1Summary,
   forecastPlan3,
 } from '../content/plan3';
-import { EXPLAIN, PROMISES_KEPT_BY_CH3, ledgerEntries } from '../content/chronicle';
+import { EXPLAIN, PROMISES_KEPT_BY_CH3, derivedPromises, ledgerEntries } from '../content/chronicle';
 import { EndingView, ExplainView, type EndingModel } from '../ui/StoryScreens';
 import {
   INITIAL_PLAN,
@@ -101,6 +101,8 @@ const JOURNAL_SOURCES: JournalSources = {
   characters: CHARACTERS,
   households: HOUSEHOLDS,
   planSummaries: { ...RESPONSE_SUMMARY, ...RESPONSE_SUMMARY3 },
+  // 結末で成立した約束（状態から導く。レビュー指摘 4）
+  derivedPromises,
 };
 const PLAN_SOURCES: PlanSources = {
   ...JOURNAL_SOURCES,
@@ -214,8 +216,6 @@ export class Game {
   private readonly skyBase: number;
   /** 出入りの暗転。 */
   private readonly fadeEl: HTMLDivElement;
-  /** 会話が終わったら、屋根葺きの日を終えて結果画面を出す。 */
-  private endDayAfterDialogue = false;
   private readonly pauseMenu: MenuPanel;
   private readonly notice: MenuPanel;
   private readonly toasts: Toasts;
@@ -469,9 +469,6 @@ export class Game {
       this.notify({ label: '相談', text: `${who}：今の案への返事は「${CONSENT_LABEL[status]}」`, sound: 'notebook' });
       this.refreshNotebookBadge();
     });
-    this.events.on('flagSet', ({ flag }) => {
-      if (flag === 'roofDay:ended') this.endDayAfterDialogue = true;
-    });
     this.events.on('chapterChanged', () => {
       refreshObjective();
       this.knownOptions = unlockedOptions(this.story);
@@ -680,6 +677,8 @@ export class Game {
 
     this.renderer.render(this.scene, this.camera);
     this.updateUi(dt);
+    // 通知は探索中・会話中だけ見える。画面を開いている間は表示時間を止める（見る前に消えない。レビュー指摘 2）
+    this.toasts.update(this.uiMode !== 'explore' && this.uiMode !== 'dialogue');
     this.input.endFrame();
     this.updateStats(dt);
   }
@@ -1011,6 +1010,8 @@ export class Game {
         if (!result?.ok) return;
         this.applySave(result.save);
         this.dispatch('close');
+        // 結果画面で記録していたら、結果画面から再開する（レビュー指摘 1）
+        this.resumeStoryScreen();
         return;
       case 'new':
         if (result?.ok) {
@@ -1223,11 +1224,8 @@ export class Game {
     this.saveGame();
     if (!cancelled && def?.kind === 'object' && def.opens === 'ledger') this.dispatch('openLedger');
     if (!cancelled && def?.kind === 'object' && def.opens === 'plan') this.openPlanBoard();
-    // サエと話して屋根葺きの日を終えた → 結果画面
-    if (this.endDayAfterDialogue) {
-      this.endDayAfterDialogue = false;
-      this.dispatch('openResult');
-    }
+    // サエと話して屋根葺きの日を終えた → 結果画面（保存される状態から決める。レビュー指摘 1）
+    this.resumeStoryScreen();
   }
 
   // ───────── 計画（作業台） ─────────
@@ -1311,6 +1309,17 @@ export class Game {
       },
       () => this.startCinematic(),
     );
+  }
+
+  /**
+   * 保存される状態から、出すべき物語の区切りの画面を出す（レビュー指摘 1）。
+   * 屋根葺きの日に「一日を終える」を選んだ後（roofDay:ended）で、まだ三年後へ進んでいなければ結果画面。
+   * 会話の終わり・つづきから・最後の記録から再開、のどこから来ても同じ判定にし、一時的な変数に頼らない。
+   * 探索中でなければ（結果画面を開いている間など）何もしない＝二重に開かない。
+   */
+  private resumeStoryScreen(): void {
+    if (this.uiMode !== 'explore') return;
+    if (this.story.chapter === 'roofDay' && this.story.has('roofDay:ended')) this.dispatch('openResult');
   }
 
   /** 結果画面を閉じたとき。屋根葺きの日の結果なら、三年後（第3幕）へ進む。 */
@@ -1517,6 +1526,7 @@ export class Game {
     const result = this.saveStore.load();
     if (result.ok) {
       this.applySave(result.save);
+      this.resumeStoryScreen();
       if (result.warnings.length > 0) console.warn('記録の読込で補正した項目', result.warnings);
       this.toasts.push('記録', '最後の記録から再開しました');
     } else {

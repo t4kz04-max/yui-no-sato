@@ -1502,8 +1502,12 @@ check('[P5] 再読み込み後も、第3幕の屋根の見た目と、サエの�
     await wait(450);
   }
   await finishDialogue();
-  await wait(600);
-  const afterToast = await toastsNow();
+  // 通知は表示待ちに並び、2 件ずつ順に出る（レビュー指摘 2）。承諾の通知が出るまで待つ（最大 15 秒）
+  let afterToast = await toastsNow();
+  for (let i = 0; i < 50 && !/承諾/.test(afterToast); i++) {
+    await wait(300);
+    afterToast = await toastsNow();
+  }
   check('[P7] 相談の返事（承諾）の通知は、「しばらく案を見つめていた」と返事を読む前には出ず、読んだ後に出る',
     sawPause && earlyToast === '' && /承諾/.test(afterToast), JSON.stringify({ sawPause, earlyToast, afterToast }));
 
