@@ -11,18 +11,32 @@ import puppeteer from 'puppeteer-core';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
+import { keepAwake, watchClock } from './test-env.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const chrome = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe';
+// テストの実行中だけスリープを抑え、PC が止まっていた時間を記録する（Phase 8）
+keepAwake();
+const clock = watchClock();
 const server = await createServer({ root: ROOT, server: { port: 5195, strictPort: false }, logLevel: 'error' });
 await server.listen();
 const browser = await puppeteer.launch({ executablePath: chrome, headless: 'new', args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--window-size=1280,720'] });
 const results = [];
 const logs = [];
+let finishing = false;
+const tally = () => `${results.filter((r) => r.startsWith('PASS')).length} PASS・${results.filter((r) => r.startsWith('FAIL')).length} FAIL`;
+// テスト用のブラウザが途中で終わったら、成功扱いにせず終える
+browser.on('disconnected', () => {
+  if (finishing) return;
+  finishing = true;
+  console.log(`\nCRASH: テスト用のブラウザとの接続が切れた（${tally()} まで）。${clock.describe()}`);
+  server.close().finally(() => process.exit(1));
+});
 const check = (name, ok, detail = '') => {
   const line = `${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  — ' + detail : ''}`;
   results.push(line);
-  if (process.env.VERBOSE) console.log(line);
+  // 途中で止まったときに、どこまで進んだか分かるように逐次出す（Phase 8）
+  console.log(line);
 };
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -211,9 +225,10 @@ try {
   const errors = logs.filter((l) => /^\[(error|pageerror)\]/.test(l) || /^\[warn/.test(l));
   check('[復元] コンソールにエラー・警告がない', errors.length === 0, errors.join(' | '));
 } catch (e) {
-  results.push(`FAIL  [復元] 例外：${e?.stack ?? e}`);
+  check('[復元] 例外なく最後まで進む', false, String(e?.stack ?? e));
 } finally {
-  console.log(results.join('\n'));
+  finishing = true;
+  console.log(`\n合計：${tally()}。${clock.describe()}`);
   await browser.close();
   await server.close();
   process.exit(results.some((r) => r.startsWith('FAIL')) ? 1 : 0);

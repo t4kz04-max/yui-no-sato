@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Phase 8（公開）— GitHub への初回 push：**作業中（Vercel へのデプロイは未実施。Phase 9 には進まない）**
+Phase 8（公開・最終品質確認）：**技術的な検証は完了、公開は作成者の承認待ち**（本番相当の環境まで確認。Vercel への公開・公開 URL の確認は未実施。Phase 9 には進まない）。詳細は `docs/PHASE8_REPORT.md`
 
 - Phase 0〜3：完了（2026-10-14）
 - Phase 3.5（試遊フィードバックに基づく改善）：完了（2026-10-14）
@@ -24,12 +24,47 @@ npm run typecheck      # TypeScript 型チェック
 npm test               # 自動テスト（Vitest）
 npm run build          # 型チェック＋本番ビルド（dist/）
 npm run preview        # 本番ビルドの確認 → http://localhost:4173/
-npm run test:browser   # ヘッドレス Chrome によるブラウザ動作確認（Chrome 必須、約20分。再開の確認を含む）
+npm run test:browser   # ヘッドレス Chrome によるブラウザ動作確認（Chrome 必須、約20分。再開・橋の通行の確認を含む）
+npm run test:bridge    # 橋の通行だけを確かめる（数分）
+npm run test:preview   # 本番ビルドを vite preview で配信して確かめる（実際の操作だけで確認）
 npm run shots          # 見た目の確認用の撮影と描画負荷の計測 → test-results/shots-latest/
 npm run check          # 型チェック＋自動テスト＋本番ビルド＋出力物の検査
 ```
 
 GPU で描画負荷を測るとき：`$env:GPU="1"; npm run shots`（垂直同期を外して FPS を測る）。
+
+## Phase 8（2026-10-15）：公開・最終品質確認
+
+**詳細：`docs/PHASE8_REPORT.md`**。ゲームのコードは変更していない（P0・P1 の不具合なし）。
+
+### Completed
+- **ブラウザテストの異常の原因の特定：**
+  - 橋の北→南の失敗：テストが実時間 20 秒で判定していて、描画が遅いと足りなかった。橋は渡り終えていた。
+  - Chrome の途中終了：テストの実行中に PC がモダン スタンバイに入っていた（Windows のイベントログで時刻が一致）。
+- **テストの改善：**
+  - 橋の通行はゲーム内の時間で判定する。
+  - 結果を 1 行ずつ出す。接続の切断で終了コード 1 にする。
+  - テストの実行中だけスリープを抑え、PC の停止を記録する（`scripts/test-env.mjs`）。
+- **追加したテスト：**
+  - 橋の回帰テスト `scripts/browser-bridge.mjs`
+  - 本番ビルドの確認 `scripts/browser-preview.mjs`（`vite preview`、実際の操作だけで起動・会話・手帳・記録・壊れた記録・結果画面の復帰・三年後・エンディング・5 つの画面サイズ）
+- **確認したこと：** Phase 7 の 8 件の修正の維持、本番ビルドと出力物、`vercel.json`、Edge での動作。
+
+### Test Results（2026-10-15 実行）
+
+| 種類 | 内容 | 結果 |
+|---|---|---|
+| Build Verified | `npx tsc --noEmit`・`npm run build`（出力物の検査を含む） | 成功（終了コード 0） |
+| Automated Test Verified | `npx vitest run` | **389/389 成功** |
+| Automated Test Verified | `npm run test:browser`（browser-check 190・browser-resume 30・browser-bridge 10） | **230/230 成功**、途中終了なし、コンソールのエラー・警告 0 件（終了コード 0） |
+| Automated Test Verified | `browser-preview.mjs`（本番ビルド）Chrome 155／Edge 155 | **33/33・33/33 成功** |
+| Not Verified | Vercel での公開・公開 URL | 未実施（作成者の承認待ち） |
+| Not Verified | Firefox・Safari | 未確認（インストールなし／Windows で実行不可） |
+| Manual Test Verified | 公開 URL で実際に遊ぶ | 未実施 |
+
+### Known Issues
+- PHASE8_REPORT §11（P0・P1 なし。P2：カメラの一時的な遮蔽、伊助を見つけやすいか、638px 幅の文字の大きさ。P3：JS 890 kB、タッチ操作なし）。
+- 作成者の判断待ち：「（仮）」「Beta 版」の表示、史実と創作の「出典を確認中」の項目の扱い。
 
 ## Phase 7 最終品質改善（2026-10-15）：独立コードレビューの指摘 8 件
 

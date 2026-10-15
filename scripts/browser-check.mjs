@@ -20,11 +20,15 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
+import { keepAwake, watchClock } from "./test-env.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = path.join(ROOT, "test-results");
 mkdirSync(OUT, { recursive: true });
 const chrome = process.env.CHROME_PATH ?? "C:/Program Files/Google/Chrome/Application/chrome.exe";
+// テストの実行中だけスリープを抑え、PC が止まっていた時間を記録する（Phase 8：途中終了の原因の切り分け）
+keepAwake();
+const clock = watchClock();
 
 const server = await createServer({ root: ROOT, server: { port: 5199, strictPort: false }, logLevel: "error" });
 await server.listen();
@@ -41,22 +45,34 @@ const logs = [];
 page.on('console', (m) => logs.push(`[${m.type()}] ${m.text()}`));
 page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
 page.on('requestfailed', (r) => logs.push(`[requestfailed] ${r.url()}`));
+page.on('error', (e) => logs.push(`[pageerror] ページがクラッシュした：${e.message}`));
 
 const results = [];
-// 途中で例外が起きても、それまでの結果と画面を残し、テスト用に起動したブラウザだけを閉じる
+const tally = () => `${results.filter((r) => r.startsWith('PASS')).length} PASS・${results.filter((r) => r.startsWith('FAIL')).length} FAIL`;
+let finishing = false;
+// 途中で例外が起きても、それまでの結果と画面を残し、テスト用に起動したブラウザだけを閉じる（終了コード 1）
 process.on('uncaughtException', async (e) => {
-  console.log(results.join('\n'));
+  if (finishing) return;
+  finishing = true;
   console.log(`\nCRASH: ${e?.stack ?? e}`);
+  console.log(`途中終了（${tally()} まで）。${clock.describe()}`);
   await page.screenshot({ path: `${OUT}/crash.png` }).catch(() => undefined);
   await browser.close().catch(() => undefined);
   await server.close().catch(() => undefined);
   process.exit(1);
 });
+// テスト用のブラウザが途中で終わったら、成功扱いにせず終える
+browser.on('disconnected', () => {
+  if (finishing) return;
+  finishing = true;
+  console.log(`\nCRASH: テスト用のブラウザとの接続が切れた（${tally()} まで）。${clock.describe()}`);
+  server.close().finally(() => process.exit(1));
+});
 const check = (name, ok, detail = '') => {
   const line = `${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  — ' + detail : ''}`;
   results.push(line);
-  // 途中で止まったときに、どこまで進んだか分かるように逐次出す
-  if (process.env.VERBOSE) console.log(line);
+  // 途中で止まったときに、どこまで進んだか分かるように逐次出す（Phase 8 から常に出す）
+  console.log(line);
 };
 const state = () =>
   page.evaluate(() => {
@@ -157,6 +173,22 @@ const holdUntil = async (keys, cond, timeoutMs, onSample) => {
   const t0 = Date.now();
   let s = await state();
   while (!cond(s) && Date.now() - t0 < timeoutMs) { await wait(40); s = await state(); onSample?.(s); }
+  for (const k of keys) await page.keyboard.up(k);
+  await wait(300);
+  return state();
+};
+/**
+ * キーを押し続け、条件を満たすか、ゲーム内で gameSeconds 秒たつまで待つ（Phase 8）。
+ * ゲームの 1 フレームで進む時間は 0.1 秒までなので、描画が遅いとゲーム内の時間は実時間より遅く進む。
+ * 実時間の上限（realLimitMs）は、止まったまま終わらないための安全策。
+ */
+const holdUntilGame = async (keys, cond, gameSeconds, realLimitMs = 180000) => {
+  const gameTime = () => page.evaluate(() => window.__yui.clock);
+  for (const k of keys) await page.keyboard.down(k);
+  const t0 = Date.now();
+  const g0 = await gameTime();
+  let s = await state();
+  while (!cond(s) && (await gameTime()) - g0 < gameSeconds && Date.now() - t0 < realLimitMs) { await wait(100); s = await state(); }
   for (const k of keys) await page.keyboard.up(k);
   await wait(300);
   return state();
@@ -1209,9 +1241,10 @@ check('[P5] 再読み込み後も、第3幕の屋根の見た目と、サエの�
   // 正規の入口から出口へ（南→北）、出口から入口へ（北→南）歩いて渡れる
   await place(0, 29, Math.PI);
   await faceNorth();
-  const crossN = await holdUntil(['KeyW'], (s) => s.z < 17.5, 20000);
+  // 歩く時間はゲーム内の時間で測る（10.5m を歩きで約 2.5 秒。描画が遅いと実時間の 20 秒では足りないことがある。Phase 8）
+  const crossN = await holdUntilGame(['KeyW'], (s) => s.z < 17.5, 8);
   check('[P5.5] 橋の入口から出口まで歩いて渡れる（南→北）', crossN.z < 17.5, `z=${crossN.z.toFixed(2)}`);
-  const crossS = await holdUntil(['KeyS'], (s) => s.z > 28, 20000);
+  const crossS = await holdUntilGame(['KeyS'], (s) => s.z > 28, 8);
   check('[P5.5] 橋の出口から入口まで歩いて渡れる（北→南）', crossS.z > 28, `z=${crossS.z.toFixed(2)}`);
 
   // 室内で記録 → 再読み込み → 室内から再開。結帳を調べられ、外にも出られる
@@ -1569,7 +1602,8 @@ const errors = logs.filter((l) => /^\[(error|pageerror|requestfailed)\]/.test(l)
 const warnings = logs.filter((l) => /^\[warn/.test(l));
 check('コンソールにエラーがない', errors.length === 0, errors.join(' | '));
 
-console.log(results.join('\n'));
+finishing = true;
+console.log(`\n合計：${tally()}。${clock.describe()}`);
 console.log('\n--- console warnings ---\n' + (warnings.join('\n') || '(なし)'));
 console.log('\n--- all console ---\n' + logs.join('\n'));
 await browser.close();

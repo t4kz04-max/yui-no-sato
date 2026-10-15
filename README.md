@@ -39,6 +39,7 @@ npm run preview      # 本番ビルドの確認 → http://localhost:4173/
 npm test             # 自動テスト（Vitest）
 npm run check        # 型チェック＋自動テスト＋本番ビルド＋出力物の検査
 npm run test:browser # ヘッドレス Chrome による動作確認（Chrome が必要）
+npm run test:preview # 本番ビルドでの動作確認（Chrome が必要）
 ```
 
 技術構成：TypeScript・Vite・Three.js。3D の形と模様はすべてコードで生成しており、外部の画像・モデル素材は使っていません。
