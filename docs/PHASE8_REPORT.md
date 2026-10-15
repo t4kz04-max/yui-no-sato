@@ -281,3 +281,9 @@ check-dist: OK（6 files、THIRD_PARTY_LICENSES.txt 1438 文字）
   - 既存のプロジェクトがある（GitHub 連携。コミット a5e9e80 の Production デプロイが 2026-10-15 に成功）。
   - 本番 URL は https://yui-no-sato.vercel.app/ 。デプロイごとの URL は Vercel のログインを求める（Deployment Protection）。
   - §9 で「公開していない」と書いたのは、当時このセッションでデプロイを確認できなかったため。
+- **公開 URL での確認（2026-10-16 06:22〜06:24）：**
+  - push（a5e9e80..926f528）の後、Vercel の自動デプロイが成功した（GitHub の記録で Production・926f528）。
+  - 本番 URL の `index.html` は、ローカルのビルドと同じファイル名（`index-CtsWSauI.js`・`index-Dn4vt4m5.css`）を読む。
+  - `browser-preview.mjs` に `PREVIEW_URL` を加え、公開 URL に対して同じ 33 項目を実行した：**33/33 成功（終了コード 0）**。
+  - 確かめたこと：起動、404 なし、外部通信なし、トキとの会話、手帳、保存・再開、壊れた記録、結果画面 → 三年後 → E1 のエンディング、5 つの画面サイズ、コンソールのエラー・警告 0 件。
+  - 人が実際の GPU で最初から通して遊ぶ確認は、作成者の確認待ち。

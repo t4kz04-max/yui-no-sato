@@ -7,6 +7,9 @@
  *
  *   npm run build && node scripts/browser-preview.mjs     （npm run test:preview）
  *
+ * 公開 URL で確かめるときは PREVIEW_URL を指定する（vite preview は起動しない）。
+ *   $env:PREVIEW_URL="https://yui-no-sato.vercel.app/"; node scripts/browser-preview.mjs
+ *
  * テスト用に起動したブラウザだけを閉じる。既存の記録・設定（普段のブラウザ）には触れない。
  */
 import puppeteer from 'puppeteer-core';
@@ -22,7 +25,8 @@ mkdirSync(OUT, { recursive: true });
 const chrome = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const SAVE_KEY = 'yui-no-yakusoku:save:1';
 const SETTINGS_KEY = 'yui-no-yakusoku:settings:1';
-if (!existsSync(path.join(ROOT, 'dist', 'index.html'))) {
+const PREVIEW_URL = process.env.PREVIEW_URL;
+if (!PREVIEW_URL && !existsSync(path.join(ROOT, 'dist', 'index.html'))) {
   console.log('FAIL  dist/index.html がない（先に npm run build を実行する）');
   process.exit(1);
 }
@@ -89,14 +93,15 @@ const fixtures = {};
 }
 
 // ───────── 2. 本番ビルドを配信して確かめる ─────────
-const server = await preview({ root: ROOT, preview: { port: 4179, strictPort: false }, logLevel: 'error' });
-const url = server.resolvedUrls?.local[0] ?? 'http://localhost:4179/';
+const server = PREVIEW_URL ? null : await preview({ root: ROOT, preview: { port: 4179, strictPort: false }, logLevel: 'error' });
+const url = PREVIEW_URL ? new URL(PREVIEW_URL).href : (server.resolvedUrls?.local[0] ?? 'http://localhost:4179/');
+if (PREVIEW_URL) console.log(`公開 URL で確かめる：${url}`);
 const browser = await launch();
 browser.on('disconnected', () => {
   if (finishing) return;
   finishing = true;
   console.log(`\nCRASH: テスト用のブラウザとの接続が切れた（${tally()} まで）。${clock.describe()}`);
-  server.httpServer.close(() => process.exit(1));
+  if (server) server.httpServer.close(() => process.exit(1));
   setTimeout(() => process.exit(1), 3000);
 });
 const logs = [];
@@ -342,5 +347,5 @@ finishing = true;
 console.log(`\n合計：${tally()}。${clock.describe()}`);
 console.log(`スクリーンショット：${path.relative(ROOT, OUT)}`);
 await browser.close();
-server.httpServer.close();
+server?.httpServer.close();
 process.exit(results.some((r) => r.startsWith('FAIL')) ? 1 : 0);

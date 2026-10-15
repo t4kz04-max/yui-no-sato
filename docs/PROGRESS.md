@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Phase 8（公開・最終品質確認）：**技術的な検証は完了、公開は作成者の承認待ち**（本番相当の環境まで確認。Vercel への公開・公開 URL の確認は未実施。Phase 9 には進まない）。詳細は `docs/PHASE8_REPORT.md`
+Phase 8（公開・最終品質確認）：**公開済み・自動確認済み、作成者の最終確認待ち**（https://yui-no-sato.vercel.app/ 、Vercel の自動デプロイ。公開 URL で 33/33。人が通して遊ぶ確認は未実施。Phase 9 には進まない）。詳細は `docs/PHASE8_REPORT.md`
 
 - Phase 0〜3：完了（2026-10-14）
 - Phase 3.5（試遊フィードバックに基づく改善）：完了（2026-10-14）
@@ -27,6 +27,7 @@ npm run preview        # 本番ビルドの確認 → http://localhost:4173/
 npm run test:browser   # ヘッドレス Chrome によるブラウザ動作確認（Chrome 必須、約20分。再開・橋の通行の確認を含む）
 npm run test:bridge    # 橋の通行だけを確かめる（数分）
 npm run test:preview   # 本番ビルドを vite preview で配信して確かめる（実際の操作だけで確認）
+# 公開 URL で確かめる：$env:PREVIEW_URL="https://yui-no-sato.vercel.app/"; node scripts/browser-preview.mjs
 npm run shots          # 見た目の確認用の撮影と描画負荷の計測 → test-results/shots-latest/
 npm run check          # 型チェック＋自動テスト＋本番ビルド＋出力物の検査
 ```
@@ -49,6 +50,8 @@ GPU で描画負荷を測るとき：`$env:GPU="1"; npm run shots`（垂直同�
 | Automated Test Verified | `npm test` | **389/389 成功** |
 | Automated Test Verified | `npm run test:browser`（190・30・10） | **230/230 成功**、PC の停止なし（05:47〜06:12、終了コード 0） |
 | Automated Test Verified | `browser-preview.mjs`（本番ビルド、Chrome） | 修正前は 32/33（音の設定 1 件が失敗）→ 再実行で 33/33 → 修正後 **33/33 成功** |
+| Automated Test Verified | 公開 URL https://yui-no-sato.vercel.app/ （Vercel の自動デプロイ、Production・926f528）に対して `browser-preview.mjs` | **33/33 成功**（06:22〜06:24、終了コード 0） |
+| Manual Test Verified | 公開 URL を人が実際の GPU で通して遊ぶ | 未実施（作成者の確認待ち） |
 
 ## Phase 8（2026-10-15）：公開・最終品質確認
 
