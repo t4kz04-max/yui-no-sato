@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "結の約束（仮）— 白川郷の「結」を題材にしたブラウザ向け短編3D探索アドベンチャー",
+  "description": "結の約束 — 白川郷の「結」を題材にしたブラウザ向け短編3D探索アドベンチャー",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build && node scripts/check-dist.mjs",

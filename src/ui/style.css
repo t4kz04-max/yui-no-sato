@@ -1,5 +1,5 @@
 /*
- * 結の約束（仮）— 画面の見た目
+ * 結の約束 — 画面の見た目
  *
  * Phase 3.5 で読みやすさを見直した（docs/PHASE3_5_IMPROVEMENT.md「A」）。
  * - 文字の大きさは下の変数でまとめて管理する。本文 17px 以上、補足も 15px 以上。
@@ -136,11 +136,6 @@ summary {
   font-weight: 700;
   letter-spacing: 0.12em;
   color: var(--hud-accent);
-}
-
-.hud-title-sub {
-  font-size: 13px;
-  color: var(--hud-sub);
 }
 
 .hud-help {
@@ -1550,12 +1545,6 @@ summary {
   margin-right: 6px;
 }
 
-.title-version {
-  margin-top: 12px;
-  font-size: 14px;
-  color: rgba(216, 204, 184, 0.7);
-}
-
 .title-controls kbd,
 .hud-hint kbd {
   display: inline-block;
@@ -2012,11 +2001,8 @@ summary {
   top: 24%;
 }
 
-/* 狭い画面（幅 760px 以下）：タイトルを小さな一行にして、目的の列の幅を確保する（文字の大きさは変えない） */
+/* 狭い画面（幅 760px 以下）：目的の列の幅を確保する（文字の大きさは変えない） */
 @media (max-width: 760px) {
-  .hud-title-sub {
-    display: none;
-  }
   .hud-right {
     max-width: min(420px, calc(100% - 170px));
   }

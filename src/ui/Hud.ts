@@ -33,7 +33,7 @@ export class Hud {
   constructor(private readonly root: HTMLElement) {
     root.innerHTML = '';
     const title = el('div', 'hud-title');
-    title.innerHTML = '<span class="hud-title-main">結の約束</span><span class="hud-title-sub">（仮）Beta 版</span>';
+    title.innerHTML = '<span class="hud-title-main">結の約束</span>';
 
     this.helpEl = el('div', 'hud-help');
     this.helpEl.innerHTML = [

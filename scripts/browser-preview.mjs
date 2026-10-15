@@ -257,7 +257,9 @@ check('[記録] ポーズ画面の「記録する」で保存される', !!saved
 await page.keyboard.press('Escape');
 await waitUi((u) => u.layers.length === 0, 5000);
 await page.keyboard.press('KeyM'); // 音を消す（設定に保存される）
-await wait(500);
+// キーはフレームごとに読むので、描画が遅いと 0.5 秒では反映されないことがある（2026-10-16 に 1 回失敗）。保存されるまで待つ
+const mutedSaved = () => page.evaluate((k) => JSON.parse(localStorage.getItem(k) ?? '{}').muted === true, SETTINGS_KEY);
+for (let i = 0; i < 100 && !(await mutedSaved()); i++) await wait(100);
 
 // 再読み込み → つづきから。設定も残る
 await page.reload({ waitUntil: 'networkidle0' });

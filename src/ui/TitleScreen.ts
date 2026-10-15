@@ -29,7 +29,7 @@ export class TitleScreen {
     panel.setAttribute('role', 'dialog');
     panel.setAttribute('aria-label', 'タイトル');
     const logo = el('div', 'title-logo');
-    logo.append(el('div', 'title-main', '結の約束'), el('div', 'title-ruby', 'ゆいのやくそく（仮）'));
+    logo.append(el('div', 'title-main', '結の約束'), el('div', 'title-ruby', 'ゆいのやくそく'));
     const lead = el('p', 'title-lead', '白川郷の「結」を題材にした、短い探索と相談の物語。\n村を歩いて住民の事情を知り、屋根葺きの段取りを一緒に考える。');
     this.itemsEl = el('div', 'title-items');
     this.statusEl = el('div', 'title-status');
@@ -46,7 +46,7 @@ export class TitleScreen {
       row.append(el('kbd', undefined, k), el('span', undefined, v));
       controls.append(row);
     }
-    panel.append(logo, lead, this.itemsEl, this.statusEl, controls, el('div', 'title-version', 'Beta 版（開発中）'));
+    panel.append(logo, lead, this.itemsEl, this.statusEl, controls);
     this.layer.append(panel);
     parent.append(this.layer);
   }

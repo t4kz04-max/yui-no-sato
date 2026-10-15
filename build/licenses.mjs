@@ -27,7 +27,7 @@ export function collectLicenses(root) {
 export function licensesText(root) {
   const list = collectLicenses(root);
   const head = [
-    '結の約束（仮） — 第三者ライセンス / Third-party licenses',
+    '結の約束 — 第三者ライセンス / Third-party licenses',
     '',
     'このゲームの公開物に含まれる第三者のソフトウェアと、その著作権表示・許諾文。',
     'This file lists third-party software bundled in this build, with their copyright notices and license texts.',
