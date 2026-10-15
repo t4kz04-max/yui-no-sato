@@ -5,3 +5,10 @@ dist/
 .DS_Store
 Thumbs.db
 test-results/
+coverage/
+.env
+.env.*
+*.local
+.vercel/
+.vscode/
+.idea/
