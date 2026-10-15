@@ -66,7 +66,7 @@ import {
 import { evaluate, knows } from '../story/conditions';
 import { SAE_HOUSE_OPEN } from '../content/house';
 import { SAE_INTERIOR, isInsideSaeHouse } from '../world/saeInterior';
-import { DEFAULT_ORBIT_LIMITS, INDOOR_ORBIT_LIMITS } from '../camera/orbit';
+import { DEFAULT_ORBIT_LIMITS, INDOOR_FRAMING, INDOOR_ORBIT_LIMITS, OUTDOOR_FRAMING, WORKSHOP_ORBIT_LIMITS, orbitSettingsFor } from '../camera/orbit';
 import { INDOOR_SKY_LIGHT_SCALE } from '../world/builders/interior';
 import { createSave, type SaveFile } from '../save/saveData';
 import { SaveStore, browserStorage, type LoadResult } from '../save/SaveStore';
@@ -81,12 +81,13 @@ import { SettingsView } from '../ui/SettingsView';
 import { HistoryView } from '../ui/HistoryView';
 import { TransitionView, type TransitionContent } from '../ui/TransitionView';
 import { SpeechBubble } from '../ui/SpeechBubble';
+import { NameTags } from '../ui/NameTags';
 import { buildHistory, type HistorySources } from '../journal/historyModel';
 import { unlockedOptions } from '../journal/planModels';
 import { roofDayArrival, roofDayBarks, roofDayProgress, roofDayWork } from '../content/staging';
 import { glancePlan } from '../content/plan';
 import { glancePlan3 } from '../content/plan3';
-import { INDOOR_FRAMING, OUTDOOR_FRAMING, orbitSettingsFor } from '../camera/orbit';
+import { isInsideWorkshop } from '../world/workshop';
 import { CHAPTER_LABEL } from '../story/types';
 
 /** 会話中のカメラ（相手と自分が斜めに見える構図）。注視点は顔の高さ。 */
@@ -146,6 +147,8 @@ const ROOF_DAY_SHOT = { focus: { x: 0, y: 3, z: 14 }, yaw: Math.PI, pitch: 0.24,
 const ROOF_DAY_SITE = { x: 0, z: 8 } as const;
 /** 住民のひと言：聞こえる距離・一人あたりの間隔・全体の間隔・表示の長さ（秒）。 */
 const BARK = { range: 4.5, roofRange: 9, cooldown: 28, gap: 7, duration: 3.6 } as const;
+/** 住民の頭上の名前を出す距離（Phase 6.5）。 */
+const NAME_TAG = { near: 6, far: 16 } as const;
 /** 新しく始めたときの導入（物語の情報は、会話で知ることだけにする）。 */
 const OPENING: TransitionContent = {
   kicker: '第1幕',
@@ -202,6 +205,9 @@ export class Game {
   private readonly roofDay: RoofDayScene;
   /** 屋外にいたときのカメラの角度と距離（室内から出たら戻す）。 */
   private outdoorCamera: { pitch: number; distance: number } | null = null;
+  /** 宗平の作業場の中にいるか（カメラの範囲を切り替える。Phase 6.5）と、入る前のカメラ。 */
+  private inWorkshop = false;
+  private workshopSavedCamera: { pitch: number; distance: number } | null = null;
   /** 空の光（屋内では強める）。 */
   private readonly skyLight: THREE.HemisphereLight;
   private readonly skyBase: number;
@@ -237,6 +243,7 @@ export class Game {
   private readonly historyView: HistoryView;
   private readonly transitionView: TransitionView;
   private readonly bubble: SpeechBubble;
+  private readonly nameTags: NameTags;
   /** 設定・記録・解説を閉じたときに戻る画面（タイトル・ポーズ・結果・エンディング）。 */
   private returnTo: UiMode | null = null;
   /** タイトル画面で読んだ前回の記録。 */
@@ -316,6 +323,7 @@ export class Game {
     this.titleScreen = new TitleScreen(hudRoot, (id) => this.onTitleItem(id), () => this.sound('move'));
     this.transitionView = new TransitionView(hudRoot, () => this.finishTransition());
     this.bubble = new SpeechBubble(hudRoot);
+    this.nameTags = new NameTags(hudRoot);
 
     this.renderer = createRenderer(canvasRoot);
     this.disposers.push(bindResize(canvasRoot, this.renderer, this.camera));
@@ -610,6 +618,7 @@ export class Game {
       this.interaction.updateTarget(this.player);
     }
     this.updateArea();
+    this.updateCameraZone();
 
     this.playerView.update(this.player, dt, DEFAULT_PLAYER_TUNING.runSpeed);
     for (const [id, view] of this.npcViews) {
@@ -896,6 +905,32 @@ export class Game {
     this.flashFade();
   }
 
+  /**
+   * 宗平の作業場の中では、カメラを屋根の下に収まる近めの距離にし、壁際では回り込む（Phase 6.5）。
+   * 出たら、入る前の距離と高さに戻す。サエ家の室内（setIndoorMode）とは別に扱う。
+   */
+  private updateCameraZone(): void {
+    if (this.world.indoor) return;
+    const inside = isInsideWorkshop(this.player.x, this.player.z);
+    if (inside === this.inWorkshop) return;
+    this.inWorkshop = inside;
+    const orbit = this.cameraRig.orbit;
+    this.cameraRig.avoidWalls = inside;
+    if (inside) {
+      this.workshopSavedCamera = { pitch: orbit.targetPitch, distance: orbit.targetDistance };
+      this.cameraRig.limits = WORKSHOP_ORBIT_LIMITS;
+      this.cameraRig.lookHeight = 1.6;
+      orbit.targetPitch = Math.min(Math.max(orbit.targetPitch, 0.3), 0.6);
+      orbit.targetDistance = 4.2;
+    } else {
+      this.cameraRig.limits = DEFAULT_ORBIT_LIMITS;
+      this.cameraRig.lookHeight = OUTDOOR_LOOK_HEIGHT;
+      orbit.targetPitch = this.workshopSavedCamera?.pitch ?? OUTDOOR_FRAMING.pitch;
+      orbit.targetDistance = this.workshopSavedCamera?.distance ?? OUTDOOR_FRAMING.distance;
+      this.workshopSavedCamera = null;
+    }
+  }
+
   /** 屋内・屋外に合わせた最初の構図にする。 */
   private applyFraming(): void {
     const f = this.world.indoor ? INDOOR_FRAMING : OUTDOOR_FRAMING;
@@ -1047,6 +1082,8 @@ export class Game {
     this.markHint('talk');
 
     const partner = this.interaction.partner;
+    // 屋根など高い所・広い物を調べる間は、観察の構図にする（Phase 6.5）
+    if (partner?.id === id && partner.kind === 'object' && partner.view) this.cameraRig.shot = partner.view;
     if (partner?.id !== id || partner.kind !== 'npc') return;
     // 住民との会話は、相手と自分が斜めに見える構図へ寄せる（設計書 L：会話時は人物が見やすい構図へ）
     const orbit = this.cameraRig.orbit;
@@ -1119,6 +1156,7 @@ export class Game {
     this.hud.setDialogueMode(false);
     this.dialogueBox.hide();
     this.restoreCamera();
+    this.cameraRig.shot = null;
     this.dispatch('dialogueEnded');
     const def = INTERACTABLES.find((i) => i.id === id);
     // サエ家の出入り（記録より先に移る：記録した位置と屋内・屋外が食い違わないように）
@@ -1492,7 +1530,29 @@ export class Game {
     this.marker.update(dt);
   }
 
+  /** 住民の頭上の名前：探索中、6〜16m の距離にいる人だけ（近くでは案内表示と重ならないよう出さない）。 */
+  private updateNameTags(): void {
+    const items: Array<{ id: string; name: string; x: number; y: number; opacity: number }> = [];
+    if (this.uiMode === 'explore' && !this.world.indoor) {
+      const canvas = this.renderer.domElement;
+      for (const [id, view] of this.npcViews) {
+        const p = view.root.position;
+        const d = Math.hypot(p.x - this.player.x, p.z - this.player.z);
+        if (d < NAME_TAG.near || d > NAME_TAG.far || this.interaction.target?.id === id) continue;
+        this.projected.set(p.x, p.y + 2.35 * view.root.scale.y, p.z).project(this.camera);
+        if (this.projected.z > 1 || Math.abs(this.projected.x) > 1 || Math.abs(this.projected.y) > 1) continue;
+        const def = NPCS.find((n) => n.id === id);
+        const name = def ? CHARACTERS[def.character as CharacterId].name : id;
+        // 遠いほど薄く
+        const opacity = 0.9 * (1 - Math.max(0, (d - NAME_TAG.far + 4) / 4));
+        items.push({ id, name, x: (this.projected.x * 0.5 + 0.5) * canvas.clientWidth, y: (-this.projected.y * 0.5 + 0.5) * canvas.clientHeight, opacity });
+      }
+    }
+    this.nameTags.update(items);
+  }
+
   private updateUi(dt: number): void {
+    this.updateNameTags();
     const view = this.interaction.view;
     const partner = this.interaction.partner;
     if (view && partner) {

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { fbm } from '../../core/noise';
 import { smoothstep } from '../../core/math';
+import { createRandom } from '../../core/random';
 
 /**
  * 合掌造りの茅葺き屋根のジオメトリ（docs/PHASE5_ART.md §1）。
@@ -50,6 +51,10 @@ export interface ThatchRoof {
    * full＝南面いっぱい、そうでなければ傷んだ所だけ。null で今の状態の見た目に戻す。
    */
   setWork(work: { readonly progress: number; readonly full: boolean } | null): void;
+  /** 傷んで乱れた茅の房のジオメトリ（傷みがある屋根だけ。Phase 6.5）。 */
+  readonly tufts: THREE.BufferGeometry | null;
+  /** 房を描く物（描画側が設定する）。屋根の状態が old のときだけ表示する。 */
+  tuftObject: THREE.Object3D | null;
   /** 屋根の状態に合わせて頂点色（と傷みのへこみ）を切り替える。 */
   setState(state: RoofState): void;
   readonly state: RoofState;
@@ -62,9 +67,13 @@ const OLD_DARK = col(0x745f42);
 const MOSS = col(0x5f6a3c);
 const DAMAGED = col(0x352c24);
 const DAMAGED_MOSS = col(0x46502e);
+const HOLE = col(0x1c1612);
+/** 傷んで乱れた茅の房（Phase 6.5）。 */
+const TUFT_DARK = col(0x4a3d2c);
+const TUFT_LIGHT = col(0x8a7450);
 const FRESH_LIGHT = col(0xf0cf82);
 const FRESH_DARK = col(0xd2ac62);
-const UNDERSIDE = col(0x3a2e22);
+const UNDERSIDE = col(0x4c3c2c);
 
 const U_SEGMENTS = 14;
 
@@ -102,6 +111,9 @@ export function createThatchRoof(spec: ThatchRoofSpec): ThatchRoof {
     return inZ * inU;
   };
 
+  /** 傷みの中の、深く欠けた所（0〜1）。下地の暗い色が見える。 */
+  const gouge = (u: number, v: number) => smoothstep(0.56, 0.7, fbm(u * 13 + 3, v * 21, seed + 61));
+
   const bump = (side: 1 | -1, u: number, v: number) => {
     const z = zAt(v);
     const swell = 0.12 * Math.sin(Math.PI * u);
@@ -129,7 +141,8 @@ export function createThatchRoof(spec: ThatchRoofSpec): ThatchRoof {
         uvs.push(p.z / 1.6, (u * slopeLen) / 2.2);
         colorKeys.push({ side, u, v, shade: 1, under: false });
         const m = damageMask(side, u, v) * smoothstep(0, 0.12, u);
-        if (m > 0.001) dip.push({ index, nx: side * sinP, ny: cosP, amount: -(0.3 + fbm(u * 8, v * 12, seed + 5) * 0.25) * m });
+        // 傷み：全体のへこみに加え、まだらに深く欠けた所（Phase 6.5 で深くした）
+        if (m > 0.001) dip.push({ index, nx: side * sinP, ny: cosP, amount: -(0.45 + fbm(u * 8, v * 12, seed + 5) * 0.35 + gouge(u, v) * 0.45) * m });
         row.push(index);
       }
       grid.push(row);
@@ -261,7 +274,9 @@ export function createThatchRoof(spec: ThatchRoofSpec): ThatchRoof {
         const damaged = (out: THREE.Color, amount: number) => {
           // 傷んだ所：黒ずんだ茅と、苔のまだら
           const blotch = smoothstep(0.45, 0.65, fbm(k.u * 9, k.v * 14, seed + 31));
-          return out.lerp(DAMAGED.clone().lerp(DAMAGED_MOSS, blotch), amount);
+          out.lerp(DAMAGED.clone().lerp(DAMAGED_MOSS, blotch), amount);
+          // 深く欠けた所は、下地の暗い色
+          return out.lerp(HOLE, gouge(k.u, k.v) * amount * 0.85);
         };
         if (state === 'worn') {
           weathered(k.side, k.u, k.v, tmp, 0.72, mossBase + 0.45);
@@ -298,6 +313,57 @@ export function createThatchRoof(spec: ThatchRoofSpec): ThatchRoof {
     damagedPositions[d.index * 3 + 1] = damagedPositions[d.index * 3 + 1]! + d.ny * d.amount;
   }
 
+  // ── 傷んで乱れた茅の房（Phase 6.5）：傷みの範囲だけに、茅が浮き上がって飛び出した細い房を置く ──
+  const tufts = spec.damage ? createTufts() : null;
+  function createTufts(): THREE.BufferGeometry {
+    const rand = createRandom(seed * 131 + 7);
+    const pos: number[] = [];
+    const cols: number[] = [];
+    const side = spec.southSide;
+    const normal = new THREE.Vector3(side * sinP, cosP, 0);
+    const down = new THREE.Vector3(side * cosP, -sinP, 0);
+    const across = new THREE.Vector3(0, 0, 1);
+    const base = new THREE.Vector3();
+    const dir = new THREE.Vector3();
+    const wide = new THREE.Vector3();
+    let placed = 0;
+    for (let n = 0; n < 2600 && placed < 170; n++) {
+      const u = 0.04 + rand() * 0.7;
+      const v = rand();
+      const m = damageMask(side, u, v);
+      if (m < 0.4 || rand() > m) continue;
+      placed++;
+      topPoint(side, u, v, base);
+      // へこみの分だけ沈めてから、少し浮かせる
+      base.addScaledVector(normal, -(0.45 + fbm(u * 8, v * 12, seed + 5) * 0.35) * m + 0.08);
+      const blades = 3 + Math.floor(rand() * 3);
+      for (let b = 0; b < blades; b++) {
+        const len = 0.35 + rand() * 0.55;
+        dir
+          .copy(normal)
+          .multiplyScalar(0.55 + rand() * 0.35)
+          .addScaledVector(down, 0.35 + rand() * 0.6)
+          .addScaledVector(across, (rand() - 0.5) * 0.9)
+          .normalize();
+        wide.crossVectors(dir, normal).normalize().multiplyScalar(0.03 + rand() * 0.02);
+        const root = base.clone().addScaledVector(across, (rand() - 0.5) * 0.25);
+        const tip = root.clone().addScaledVector(dir, len);
+        const a = root.clone().add(wide);
+        const c = root.clone().sub(wide);
+        pos.push(a.x, a.y, a.z, c.x, c.y, c.z, tip.x, tip.y, tip.z);
+        const shade = 0.75 + rand() * 0.35;
+        const dark = TUFT_DARK.clone().multiplyScalar(shade);
+        const light = TUFT_LIGHT.clone().lerp(TUFT_DARK, rand() * 0.6).multiplyScalar(shade);
+        cols.push(dark.r, dark.g, dark.b, dark.r, dark.g, dark.b, light.r, light.g, light.b);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+    g.computeVertexNormals();
+    return g;
+  }
+
   let current: RoofState = 'old';
   /** 作業の進み具合の見た目（空なら今の状態の見た目）。 */
   let workKey = '';
@@ -310,6 +376,8 @@ export function createThatchRoof(spec: ThatchRoofSpec): ThatchRoof {
     underY,
     surfaceY: (absX) => topEaveY + (halfSpan - absX) * tanP,
     surfacePoint: (side, u, v) => topPoint(side, u, v),
+    tufts,
+    tuftObject: null,
     get state() {
       return current;
     },
@@ -326,6 +394,7 @@ export function createThatchRoof(spec: ThatchRoofSpec): ThatchRoof {
       geometry.computeVertexNormals();
       geometry.computeBoundingSphere();
       current = state;
+      if (roof.tuftObject) roof.tuftObject.visible = state === 'old';
       workKey = '';
     },
     setWork(work) {

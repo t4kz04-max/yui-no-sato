@@ -5,6 +5,7 @@
  * - Phase 2（[P2]）：手帳、結帳、ポーズ、会話の中断、記録（保存・続きから・壊れた記録・やり直し）
  * - Phase 5.5（[P5.5]）：サエ家の出入り（許しの前後）、室内の移動とカメラ、結帳、室内での記録・読込、橋の欄干（実際に歩かせる）、橋の通行
  * - Phase 5（[P5]）：住民の待機の型、5 地点、すべての住民・調べられる物の操作、屋根葺きの日（計画ごとの人・役割・茅の山・足場、運ぶ人の動きと立ち止まり）、第3幕の見た目（杖・屋根）、記録の復元、描画呼び出し数
+ * - Phase 6.5（[P6.5]）：見上げるカメラ、屋根を調べる間の観察の構図、作業場に入る・中の判定・出る、住民の名前
  * - Phase 6（[P6]）：タイトル画面・導入・操作の手引き、決定時の知らせと屋根葺きの日の朝・見渡し、選んだことの記録、三年後の時間経過、エンディングの振り返り、史実と創作（4 区分と出典）、音（開始・ミュート）、設定の保存、室内の壁際のカメラ、作業台の見比べ、屋根葺きの日のひと言・作業の進み具合・作業の音、設定と記録の画面の大きさ
  * - Phase 4（[P4]）：宗平・ミネを含む作業台（項目の出し分け）、相談と見直し、屋根葺き当日、三年後、第3幕（Q1〜Q3）、エンディング、史実と創作の解説、記録の復元、各画面の大きさ（1280x720・1024x640）
  *
@@ -808,7 +809,7 @@ check('[P6] 結果画面から「選んだことの記録」を開ける（選�
   q4h1.mode === 'history' && /選んだこと/.test(q4h1.text) && /承知した/.test(q4h1.text) && /その結果/.test(q4h1.text), q4h1.text.slice(0, 120));
 await page.screenshot({ path: `${OUT}/shot-52b-history.png` });
 await page.keyboard.press('Escape');
-await wait(300);
+await waitMode('result', 5000);
 check('[P6] 記録を閉じると結果画面に戻る', (await gameMode()) === 'result');
 await page.keyboard.press('Enter');
 await waitMode('transition');
@@ -1015,8 +1016,9 @@ const q5a = await p5();
 const idle = { toki: 'fidget', sae: 'handsFront', isuke: 'lookField', sohei: 'armsCrossed', mine: 'holdBook' };
 check('[P5] 5 人の住民が、それぞれの待機の型で立っている（全員が同じ棒立ちではない）',
   JSON.stringify(q5a.styles) === JSON.stringify(idle), JSON.stringify(q5a.styles));
-check('[P5] 住民のモデルは部位ごとにまとめられている（体 8 回＋持ち物 1 回以内の描画）',
-  Object.values(q5a.npcMeshes).every((n) => n >= 8 && n <= 9), JSON.stringify(q5a.npcMeshes));
+// Phase 6.5：体は一つのスキンメッシュ。描画は体 1 回＋足元の影 1 回＋手に持つ物（持つ人だけ）1 回
+check('[P5] 住民のモデルはまとめて描かれている（体 1 回＋足元の影 1 回＋持ち物 1 回以内）',
+  Object.values(q5a.npcMeshes).every((n) => n >= 2 && n <= 3), JSON.stringify(q5a.npcMeshes));
 check('[P5] 第1幕：サエ家の屋根は傷んだ見た目、伊助家はふつう、当日の作業の場はない',
   q5a.roofs.sae === 'old' && q5a.roofs.isuke === 'old' && !q5a.roofDayVisible, JSON.stringify(q5a.roofs));
 
@@ -1285,7 +1287,8 @@ check('[P5] 再読み込み後も、第3幕の屋根の見た目と、サエの�
     const c = g.camera.position;
     const p = g.scene.getObjectByName('player');
     let opacity = 1;
-    p.traverse((o) => { if (o.isMesh) opacity = o.material.opacity; });
+    // 体のスキンメッシュ（足元の影は別の材質なので除く）
+    p.traverse((o) => { if (o.isSkinnedMesh) opacity = o.material.opacity; });
     return { visible: p.visible, opacity, cam: [c.x, c.y, c.z], dist: g.cameraRig.currentDistance, floor: g.player.y };
   });
   check('[P6] 室内の壁際でも、主人公は消えずに見え、カメラは室内に収まる',
@@ -1364,6 +1367,78 @@ check('[P5] 再読み込み後も、第3幕の屋根の見た目と、サエの�
   await wait(600);
   const r4 = await page.evaluate(() => window.__yui.audio.work.volume);
   check('[P6] 作業の場から離れると作業の音は小さくなる', r3 && r4 < r2.work.volume, String(r4));
+}
+
+// ───────── Phase 6.5：見上げるカメラ・屋根の観察・作業場に入る・住民の名前 ─────────
+{
+  await page.evaluate(() => localStorage.clear());
+  await page.reload({ waitUntil: 'networkidle0' });
+  await wait(2000);
+  await startFromTitle('new');
+  const cam = () => page.evaluate(() => {
+    const g = window.__yui;
+    const d = new g.camera.position.constructor();
+    g.camera.getWorldDirection(d);
+    const c = g.camera.position;
+    return {
+      pitch: g.cameraRig.orbit.targetPitch, dirY: d.y, pos: [c.x, c.y, c.z], ground: g.world.groundHeight(c.x, c.z),
+      inShot: g.cameraRig.inShot, maxDist: g.cameraRig.limits.maxDistance, x: g.player.x, z: g.player.z, mode: g.mode,
+    };
+  });
+  // 見上げ：サエ家の前でマウスを上へドラッグする
+  await place(-3, 11.5, Math.PI);
+  await page.evaluate(() => { const o = window.__yui.cameraRig.orbit; o.yaw = o.targetYaw = Math.PI; });
+  await wait(500);
+  await page.mouse.move(640, 500);
+  await page.mouse.down();
+  for (let i = 0; i < 12; i++) { await page.mouse.move(640, 500 - i * 40); await wait(60); }
+  await page.mouse.up();
+  await wait(1500);
+  const lu = await cam();
+  check('[P6.5] 屋外ではマウスを上へドラッグすると見上げられ、カメラは地面より上にある', lu.pitch < -0.3 && lu.dirY > 0.3 && lu.pos[1] > lu.ground + 0.4, JSON.stringify(lu));
+  await page.screenshot({ path: `${OUT}/shot-70-p65-lookup.png` });
+  await page.evaluate(() => { const o = window.__yui.cameraRig.orbit; o.pitch = o.targetPitch = 0.16; });
+
+  // 屋根を調べる：観察の構図（広場から傷んだ所を見上げる）→ 終わると戻る
+  await place(-4, 11.2, Math.PI);
+  await waitFor((u) => u.target === 'saeRoof');
+  await press('KeyE', (u) => u.dialogueVisible);
+  await wait(2500);
+  const ri = await cam();
+  check('[P6.5] 屋根を調べる間は、観察の構図で屋根の傷んだ所を見上げる', ri.inShot && ri.dirY > 0.25 && Math.hypot(ri.pos[0] + 3.2, ri.pos[2] - 19) < 2, JSON.stringify(ri));
+  await page.screenshot({ path: `${OUT}/shot-71-p65-roof-inspect.png` });
+  await finishDialogue();
+  // 低 FPS でも戻りきるまで待つ（最大 10 秒）
+  for (let i = 0; i < 50 && (await page.evaluate(() => window.__yui.cameraRig.inShot)); i++) await wait(200);
+  const ro = await cam();
+  check('[P6.5] 調べ終えると、いつもの追従の構図に戻る', !ro.inShot && ro.mode === 'explore', JSON.stringify(ro));
+
+  // 宗平の作業場：正面から歩いて入り、中を歩き、外へ出る
+  await place(0.5, -21.5, Math.PI);
+  await page.evaluate(() => { const o = window.__yui.cameraRig.orbit; o.yaw = o.targetYaw = Math.PI; });
+  await wait(400);
+  const w1 = await holdUntil(['KeyW'], (s) => s.z < -26.5, 12000);
+  await wait(800);
+  const w1c = await cam();
+  check('[P6.5] 作業場に正面から歩いて入れ、中ではカメラが近め（屋根の下）になる', w1.z < -26.5 && w1c.maxDist < 6 && w1c.pos[1] < w1c.ground + 4.2, JSON.stringify({ z: w1.z, w1c }));
+  await page.screenshot({ path: `${OUT}/shot-72-p65-workshop-inside.png` });
+  const w2 = await holdUntil(['KeyW'], () => false, 2500);
+  check('[P6.5] 作業場の奥の材木・壁はすり抜けられない', w2.z > -29.6, `z=${w2.z.toFixed(2)}`);
+  const w3 = await holdUntil(['KeyD'], () => false, 3000);
+  check('[P6.5] 作業場の右の壁・作業台はすり抜けられない', w3.x < 3.6, `x=${w3.x.toFixed(2)}`);
+  await place(0, -26.5, 0);
+  await page.evaluate(() => { const o = window.__yui.cameraRig.orbit; o.yaw = o.targetYaw = 0; });
+  const w4 = await holdUntil(['KeyW'], (s) => s.z > -22.5, 12000);
+  await wait(800);
+  const w4c = await cam();
+  check('[P6.5] 作業場から同じ開口を通って外へ出られ、カメラも元に戻る', w4.z > -22.5 && w4c.maxDist > 20, JSON.stringify({ z: w4.z, maxDist: w4c.maxDist }));
+
+  // 住民の名前：少し離れた所から、頭上に名前が見える
+  await place(0, 24, Math.PI);
+  await page.evaluate(() => { const o = window.__yui.cameraRig.orbit; o.yaw = o.targetYaw = Math.PI; o.pitch = o.targetPitch = 0.2; });
+  await wait(1200);
+  const tags = await page.evaluate(() => [...document.querySelectorAll('.name-tag')].filter((t) => !t.hidden).map((t) => t.textContent));
+  check('[P6.5] 少し離れた住民の頭上に名前が出る（人だけ）', tags.includes('トキ') || tags.includes('サエ'), JSON.stringify(tags));
 }
 
 // 描画負荷（ソフトウェア描画のため FPS は参考にならない。描画呼び出し数で確認する）

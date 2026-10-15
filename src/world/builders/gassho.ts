@@ -256,6 +256,15 @@ export function createGasshoHouse(p: Palette, style: GasshoStyle = DEFAULT_GASSH
   roofMesh.name = 'thatch-roof';
   markCameraBlocker(roofMesh);
   house.add(roofMesh);
+  // 傷んで乱れた茅の房（傷みのある屋根だけ。状態が old のときだけ見える。Phase 6.5）
+  if (roof.tufts) {
+    const tuftMesh = shadowed(new THREE.Mesh(roof.tufts, tuftMaterial()), false);
+    tuftMesh.name = 'thatch-tufts';
+    tuftMesh.userData.dynamic = true;
+    roof.tuftObject = tuftMesh;
+    tuftMesh.visible = roof.state === 'old';
+    house.add(tuftMesh);
+  }
 
   // 棟：茅を丸く押さえた上に、押さえの木を並べる
   const ridge = shadowed(
@@ -339,3 +348,10 @@ export function createGasshoHouse(p: Palette, style: GasshoStyle = DEFAULT_GASSH
 
 /** 屋根の勾配と寸法（当日の足場や屋根の上の人の位置を決めるのに使う）。 */
 export const GASSHO_ROOF = { pitch: PITCH, halfSpan: HALF_SPAN, thickness: THICKNESS, eaveLow: EAVE_LOW, halfDepth: ROOF_HALF_DEPTH } as const;
+
+let sharedTuftMaterial: THREE.MeshStandardMaterial | null = null;
+/** 乱れた茅の房の材質（細い面なので両面を描く）。 */
+function tuftMaterial(): THREE.MeshStandardMaterial {
+  sharedTuftMaterial ??= new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0, side: THREE.DoubleSide });
+  return sharedTuftMaterial;
+}

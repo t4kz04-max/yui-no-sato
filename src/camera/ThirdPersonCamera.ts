@@ -7,6 +7,7 @@ import {
   createOrbitState,
   orbitOffset,
   pickClearYaw,
+  splitPitch,
   type OrbitInput,
   type OrbitLimits,
   type OrbitSettings,
@@ -46,6 +47,15 @@ export class ThirdPersonCamera {
   settings: OrbitSettings = DEFAULT_ORBIT_SETTINGS;
   /** 壁際で遮られたら、横へ回り込んで主人公と進む先を見せる（室内。Phase 6）。 */
   avoidWalls = false;
+  /**
+   * 観察の構図（Phase 6.5）：調べている間、決まった位置から決まった所を見る（屋根の傷みなど）。
+   * null に戻すと、追従の構図へ滑らかに戻る。
+   */
+  shot: { readonly pos: THREE.Vector3Like; readonly look: THREE.Vector3Like } | null = null;
+  private shotBlend = 0;
+  private readonly shotPos = new THREE.Vector3();
+  private readonly shotLook = new THREE.Vector3();
+  private readonly lookPoint = new THREE.Vector3();
 
   constructor(
     readonly camera: THREE.PerspectiveCamera,
@@ -67,7 +77,9 @@ export class ThirdPersonCamera {
       this.target.lerp(goal, damp(20, dt));
     }
 
-    const offset = orbitOffset(this.orbit.yaw, this.orbit.pitch, this.orbit.distance);
+    // 見上げるときは、カメラの高さを保ったまま視線だけを上へ傾ける（地面に潜らない）
+    const pitch = splitPitch(this.orbit.pitch);
+    const offset = orbitOffset(this.orbit.yaw, pitch.position, this.orbit.distance);
     this.dir.set(offset.x, offset.y, offset.z).normalize();
 
     // 注視点からカメラ方向へレイを飛ばし、遮蔽物の手前で止める
@@ -75,7 +87,7 @@ export class ThirdPersonCamera {
     // 壁際：自分で視点を動かしていない間だけ、遮られない向きへゆっくり回り込む
     if (this.avoidWalls && input.lookX === 0 && allowed < this.orbit.distance * 0.75) {
       const candidates = AVOID_OFFSETS.map((offset) => {
-        const o = orbitOffset(this.orbit.yaw + offset, this.orbit.pitch, this.orbit.distance);
+        const o = orbitOffset(this.orbit.yaw + offset, pitch.position, this.orbit.distance);
         return { offset, free: this.freeDistance(this.probe.set(o.x, o.y, o.z).normalize()) };
       });
       const turn = pickClearYaw(allowed, candidates);
@@ -91,8 +103,33 @@ export class ThirdPersonCamera {
     const minY = this.env.groundHeight(this.desired.x, this.desired.z) + 0.4;
     if (this.desired.y < minY) this.desired.y = minY;
 
+    // 視線の先：見上げるときは、注視点の上の方（カメラから見て視線を上へ傾けた先）
+    this.lookPoint.copy(this.target);
+    if (pitch.lookUp > 0) {
+      const horizontal = Math.hypot(this.target.x - this.desired.x, this.target.z - this.desired.z) || 1;
+      const base = Math.atan2(this.target.y - this.desired.y, horizontal);
+      this.lookPoint.y = this.desired.y + Math.tan(Math.min(1.25, base + pitch.lookUp)) * horizontal;
+    }
+
+    // 観察の構図へ滑らかに移る（戻るときも滑らかに）
+    this.shotBlend += ((this.shot ? 1 : 0) - this.shotBlend) * damp(4.5, dt);
+    if (this.shot) {
+      this.shotPos.copy(this.shot.pos);
+      this.shotLook.copy(this.shot.look);
+    }
+    if (this.shotBlend > 0.001) {
+      const t = this.shotBlend * this.shotBlend * (3 - 2 * this.shotBlend);
+      this.desired.lerp(this.shotPos, t);
+      this.lookPoint.lerp(this.shotLook, t);
+    }
+
     this.camera.position.copy(this.desired);
-    this.camera.lookAt(this.target);
+    this.camera.lookAt(this.lookPoint);
+  }
+
+  /** 観察の構図に入っているか（入りかけ・戻りかけを含む）。 */
+  get inShot(): boolean {
+    return this.shotBlend > 0.02;
   }
 
   /** 注視点から dir の向きに、遮蔽物に当たらず離せる距離。 */
@@ -109,6 +146,7 @@ export class ThirdPersonCamera {
     this.orbit.yaw = this.orbit.targetYaw = yaw;
     this.initialized = false;
     this.effectiveDistance = this.orbit.distance;
+    if (!this.shot) this.shotBlend = 0;
   }
 
   /** 上下角と距離を、補間せずに置き直す。 */

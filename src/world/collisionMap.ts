@@ -11,6 +11,7 @@ import {
   type PropDef,
   type TreeDef,
 } from './layout';
+import { workshopColliders } from './workshop';
 
 /**
  * 配置データから当たり判定を生成する。
@@ -106,7 +107,11 @@ export interface CollisionMapSource {
 
 export function buildCollisionMap(src: CollisionMapSource): Collider[] {
   const colliders: Collider[] = [];
-  for (const b of src.buildings) colliders.push(buildingCollider(b));
+  // 宗平の作業場は外形の箱ではなく、壁と中の物ごとの判定にする（正面から入れる。Phase 6.5）
+  for (const b of src.buildings) {
+    if (b.kind === 'workshop') colliders.push(...workshopColliders());
+    else colliders.push(buildingCollider(b));
+  }
   for (const p of src.props) {
     const c = propCollider(p);
     if (c) colliders.push(c);

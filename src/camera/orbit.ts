@@ -4,7 +4,7 @@ import { clamp, damp, dampAngle, type Vec3 } from '../core/math';
  * 三人称カメラの軌道パラメータと計算。Three.js 非依存でテスト可能。
  *
  * yaw   : 水平角。カメラはプレイヤーから見て -forward(yaw) 側に位置する。
- * pitch : 見下ろし角（ラジアン）。
+ * pitch : 見下ろし角（ラジアン）。負は見上げ（Phase 6.5）：カメラの高さは保ち、視線だけを上へ傾ける（splitPitch）。
  * distance : 注視点からの距離。
  */
 export interface OrbitLimits {
@@ -15,7 +15,8 @@ export interface OrbitLimits {
 }
 
 export const DEFAULT_ORBIT_LIMITS: OrbitLimits = {
-  minPitch: 0.05,
+  // 屋外は見上げられる（合掌造りの屋根の上部を見るため。Phase 6.5）
+  minPitch: -0.7,
   maxPitch: 1.35,
   minDistance: 3.5,
   maxDistance: 22,
@@ -37,6 +38,14 @@ export const INDOOR_ORBIT_LIMITS: OrbitLimits = {
   maxPitch: 0.9,
   minDistance: 2.2,
   maxDistance: 4.6,
+};
+
+/** 宗平の作業場の中：屋根の下に収まる、近めの距離（Phase 6.5）。 */
+export const WORKSHOP_ORBIT_LIMITS: OrbitLimits = {
+  minPitch: 0.06,
+  maxPitch: 0.85,
+  minDistance: 2.2,
+  maxDistance: 5.2,
 };
 
 /**
@@ -129,4 +138,15 @@ export function orbitOffset(yaw: number, pitch: number, distance: number): Vec3 
     y: Math.sin(pitch) * distance,
     z: -Math.cos(yaw) * horizontal,
   };
+}
+
+/** これより小さい上下角では、カメラの位置はこの角度のまま保ち、残りを視線の傾きにする。 */
+export const LOOK_UP_START = 0.04;
+
+/**
+ * 上下角を「カメラの位置に使う角度」と「視線を上へ傾ける角度」に分ける（Phase 6.5）。
+ * 見上げるときにカメラを地面へ潜らせず、主人公の後ろ・頭の高さから上を見る。
+ */
+export function splitPitch(pitch: number, start = LOOK_UP_START): { position: number; lookUp: number } {
+  return pitch >= start ? { position: pitch, lookUp: 0 } : { position: start, lookUp: start - pitch };
 }

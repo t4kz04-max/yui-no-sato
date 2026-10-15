@@ -54,6 +54,6 @@ export class NpcView {
     const goal = lookAt ? Math.atan2(lookAt.x - this.home.x, lookAt.z - this.home.z) : this.home.heading;
     this.heading = dampAngle(this.heading, goal, 6, dt);
     this.root.rotation.y = this.heading;
-    this.figure.update(dt, { talking, attending: lookAt !== null });
+    this.figure.update(dt, { talking, attending: lookAt !== null, speaking: talking });
   }
 }

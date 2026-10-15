@@ -76,6 +76,8 @@ export const INTERACTABLES: readonly Interactable[] = [
     position: { x: -4, z: 9.9 },
     range: 2.8,
     markerHeight: 2.6,
+    // 調べている間は、広場から南面の傷んだ所（西寄り）を見上げる（Phase 6.5）
+    view: { pos: { x: -3.2, z: 19, y: 2.5 }, look: { x: -4.2, y: 9.2, z: 3.5 } },
   },
   {
     kind: 'object',

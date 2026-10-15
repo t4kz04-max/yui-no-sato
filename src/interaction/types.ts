@@ -35,6 +35,11 @@ export interface ObjectInteractable extends InteractableBase {
   readonly opens?: 'ledger' | 'plan' | 'enterHouse' | 'leaveHouse';
   /** 案内表示の動詞（既定は「調べる」。入口は「入る」「出る」）。 */
   readonly action?: string;
+  /**
+   * 調べている間の観察の構図（Phase 6.5）：カメラの位置と、見る所（ワールド座標）。
+   * 屋根のように高い所・広い物を、主人公の後ろからでは見きれないときに使う。
+   */
+  readonly view?: { readonly pos: { readonly x: number; readonly y: number; readonly z: number }; readonly look: { readonly x: number; readonly y: number; readonly z: number } };
   /** 案内表示を出す高さ（地面から）。 */
   readonly markerHeight: number;
 }

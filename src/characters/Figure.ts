@@ -1,6 +1,7 @@
 import type * as THREE from 'three';
 import { damp } from '../core/math';
-import { applyPose, createPersonRig, setHeldProp, type PersonAppearance, type PersonRig } from './personRig';
+import { applyFace, applyPose, createPersonRig, setHeldProp, type PersonAppearance, type PersonRig } from './personRig';
+import { FaceAnimator } from './face';
 import { addTalkGesture, blendPose, heldPropFor, idlePose, neutralPose, walkPose, type JointPose, type PoseStyle } from './poses';
 
 /**
@@ -16,6 +17,8 @@ export class Figure {
   private talk = 0;
   private attention = 0;
   private walkPhase = 0;
+  /** まばたき・口・眉（Phase 6.5）。 */
+  private readonly face: FaceAnimator;
 
   constructor(
     look: PersonAppearance,
@@ -27,6 +30,7 @@ export class Figure {
     this.style = style;
     // 全員が同じ拍子で動かないように、人ごとに時間をずらす
     this.time = seed * 2.3;
+    this.face = new FaceAnimator(seed);
     setHeldProp(this.rig, heldPropFor(style));
     Object.assign(this.pose, idlePose(style, this.time, seed));
     applyPose(this.rig, this.pose);
@@ -46,8 +50,9 @@ export class Figure {
    * @param talking 話している間（手振りとうなずきを付ける）
    * @param attending 相手と向き合っている間（よそ見をやめる）
    * @param walking 歩いているとき：速さの割合（0〜1）
+   * @param speaking 声に出して話している間（口を動かす。文字送りの間）
    */
-  update(dt: number, opts: { talking?: boolean; attending?: boolean; walking?: number } = {}): void {
+  update(dt: number, opts: { talking?: boolean; attending?: boolean; walking?: number; speaking?: boolean } = {}): void {
     this.time += dt;
     this.talk += ((opts.talking ? 1 : 0) - this.talk) * damp(5, dt);
     this.attention += ((opts.attending ? 1 : 0) - this.attention) * damp(4, dt);
@@ -63,5 +68,6 @@ export class Figure {
     }
     blendPose(this.pose, target, damp(10, dt));
     applyPose(this.rig, this.pose);
+    applyFace(this.rig, this.face.update(dt, opts.speaking ?? false, opts.attending ?? false));
   }
 }

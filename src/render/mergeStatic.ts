@@ -5,7 +5,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
  * 動かない小さなメッシュ（柱・窓・薪など）を、マテリアルと影設定ごとに1つのメッシュへ結合する。
  * 合掌造りのように部品の多い建物でも描画呼び出し回数を抑えるため。
  *
- * 結合しないもの：カメラの遮蔽判定に使うメッシュ、複数マテリアルのメッシュ、InstancedMesh。
+ * 結合しないもの：カメラの遮蔽判定に使うメッシュ、表示を切り替えるメッシュ、複数マテリアルのメッシュ、InstancedMesh。
  */
 export function mergeStaticMeshes(root: THREE.Object3D): { before: number; after: number } {
   root.updateMatrixWorld(true);
@@ -15,7 +15,8 @@ export function mergeStaticMeshes(root: THREE.Object3D): { before: number; after
 
   root.traverse((obj) => {
     if (!(obj instanceof THREE.Mesh) || obj instanceof THREE.InstancedMesh) return;
-    if (obj.userData.cameraBlocker || Array.isArray(obj.material)) return;
+    // 表示を切り替える物（userData.dynamic）は結合しない（Phase 6.5：屋根の乱れた茅など）
+    if (obj.userData.cameraBlocker || obj.userData.dynamic || Array.isArray(obj.material)) return;
     const material = obj.material as THREE.Material;
     const geo = obj.geometry.index ? obj.geometry.toNonIndexed() : obj.geometry.clone();
     geo.applyMatrix4(new THREE.Matrix4().multiplyMatrices(rootInverse, obj.matrixWorld));

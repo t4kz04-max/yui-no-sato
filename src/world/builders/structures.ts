@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { createRandom } from '../../core/random';
 import { BUILDING_FOOTPRINT, type PropDef, type PropKind } from '../layout';
 import { terrainHeight } from '../terrain';
+import { WORKSHOP } from '../workshop';
 import { boxWithWorldUv, markCameraBlocker, shadowed, type Palette } from './materials';
 
 /**
@@ -111,8 +112,14 @@ export function createWorkshop(p: Palette): THREE.Group {
     for (let k = -2; k <= 2; k++) g.add(at(mesh(new THREE.BoxGeometry(0.12, 0.7, 0.05), p.woodLight, false), side * (w / 2 + 0.04), 2.0, k * 0.25));
   }
 
+  addWorkshopInterior(g, p);
+
   const roof = gableBoardRoof(p, fp.halfWidth + 0.6, fp.halfDepth + 0.7, 28);
   roof.position.y = 0.2 + wallH;
+  // 中に入れるので、屋根はカメラの遮蔽物にする（屋根越しに上から覗き込まない。Phase 6.5）
+  roof.traverse((o) => {
+    if (o instanceof THREE.Mesh) markCameraBlocker(o);
+  });
   g.add(roof);
   // 妻壁
   const tri = new THREE.Shape();
@@ -125,6 +132,11 @@ export function createWorkshop(p: Palette): THREE.Group {
     gable.position.set(0, 0.2 + wallH, side * (d / 2 - 0.02));
     if (side < 0) gable.rotation.y = Math.PI;
     g.add(gable);
+    // 中から見た妻壁（中に入れるようになったので、内側にも面を向ける。Phase 6.5）
+    const inner = mesh(new THREE.ShapeGeometry(tri), p.woodWall, false);
+    inner.position.set(0, 0.2 + wallH, side * (d / 2 - 0.06));
+    if (side > 0) inner.rotation.y = Math.PI;
+    g.add(inner);
   }
 
   // 正面に立てかけた材木
@@ -398,4 +410,87 @@ export function createLadder(p: Palette, length: number): THREE.Group {
 /** 茅の山（屋根葺きの日）。large：ミネから借りた茅も積んだ大きな山。 */
 export function createKayaPile(p: Palette, size: 'large' | 'small', fresh: boolean): THREE.Group {
   return size === 'large' ? kayaStack(p, 3, 4, 2.4, fresh ? 0.95 : 0.4) : kayaStack(p, 3, 2, 2.2, fresh ? 0.9 : 0.35);
+}
+
+/**
+ * 宗平の作業場の中（Phase 6.5）。配置は world/workshop.ts の WORKSHOP（当たり判定と同じデータ）。
+ * 屋根葺きの段取りをする世話役の作業小屋として、木工の道具と材料、作りかけの梯子、縄と茅の束を置く
+ * （ゲーム用の創作の小屋。特定の道具の名前や使い方を史実として示すものではない）。
+ */
+function addWorkshopInterior(g: THREE.Group, p: Palette): void {
+  const floorY = 0.27;
+  const prop = (id: string) => WORKSHOP.props.find((q) => q.id === id)!;
+
+  // 入口の踏み石
+  g.add(at(mesh(new THREE.BoxGeometry(2.2, 0.16, 0.6), p.stone, false), 0, 0.08, WORKSHOP.base.halfDepth + 0.25));
+
+  // 作業台の上：鉋・のみ・墨壺・木の板
+  const bench = prop('bench');
+  const top = floorY + 0.74;
+  g.add(at(mesh(new THREE.BoxGeometry(0.28, 0.08, 0.09), p.woodLight, false), bench.x - 0.5, top + 0.04, bench.z + 0.05));
+  g.add(at(mesh(new THREE.BoxGeometry(0.06, 0.03, 0.03), p.iron, false), bench.x - 0.5, top + 0.09, bench.z + 0.05));
+  for (let i = 0; i < 3; i++) {
+    const chisel = at(mesh(new THREE.BoxGeometry(0.03, 0.02, 0.24), i === 1 ? p.iron : p.woodDark, false), bench.x + 0.05 + i * 0.07, top + 0.015, bench.z - 0.1);
+    chisel.rotation.y = 0.15;
+    g.add(chisel);
+  }
+  g.add(at(mesh(new THREE.BoxGeometry(0.18, 0.1, 0.1), p.woodDark, false), bench.x + 0.55, top + 0.05, bench.z + 0.12));
+  g.add(at(mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.1, 8).rotateZ(Math.PI / 2), p.woodLight, false), bench.x + 0.55, top + 0.07, bench.z + 0.12));
+  g.add(at(mesh(new THREE.BoxGeometry(0.9, 0.04, 0.32), p.woodWeathered, false), bench.x + 0.1, top + 0.02, bench.z + 0.16));
+
+  // 奥の壁の道具掛け：横木と、のこぎり・木槌・曲尺
+  const tw = prop('toolWall');
+  g.add(at(mesh(new THREE.BoxGeometry(1.4, 0.08, 0.08), p.woodDark, false), tw.x, 1.9, tw.z));
+  const saw = at(mesh(new THREE.BoxGeometry(0.5, 0.16, 0.015), p.iron, false), tw.x - 0.35, 1.68, tw.z + 0.06);
+  saw.rotation.z = 0.1;
+  g.add(saw);
+  g.add(at(mesh(new THREE.BoxGeometry(0.04, 0.3, 0.04), p.woodLight, false), tw.x - 0.05, 1.72, tw.z + 0.06));
+  g.add(at(mesh(new THREE.BoxGeometry(0.16, 0.1, 0.1), p.woodLight, false), tw.x - 0.05, 1.55, tw.z + 0.06));
+  g.add(at(mesh(new THREE.BoxGeometry(0.04, 0.45, 0.01), p.iron, false), tw.x + 0.35, 1.68, tw.z + 0.06));
+  g.add(at(mesh(new THREE.BoxGeometry(0.3, 0.04, 0.01), p.iron, false), tw.x + 0.48, 1.47, tw.z + 0.06));
+
+  // 木挽き台と丸太
+  const sh = prop('sawhorse');
+  for (const dx of [-0.6, 0.6]) {
+    for (const s of [1, -1]) {
+      const leg = at(mesh(new THREE.BoxGeometry(0.07, 0.75, 0.07), p.woodDark, false), sh.x + dx, floorY + 0.34, sh.z + s * 0.12);
+      leg.rotation.x = s * 0.35;
+      g.add(leg);
+    }
+  }
+  g.add(at(mesh(new THREE.BoxGeometry(1.5, 0.08, 0.1), p.woodDark, false), sh.x, floorY + 0.68, sh.z));
+  g.add(at(mesh(new THREE.CylinderGeometry(0.17, 0.19, 1.6, 9).rotateZ(Math.PI / 2), p.trunk), sh.x, floorY + 0.88, sh.z));
+
+  // 作りかけの梯子（右の壁に立てかけ、横木の何本かは床に置いたまま）
+  const ld = prop('ladder');
+  const rails = new THREE.Group();
+  for (const dz of [-0.24, 0.24]) rails.add(at(mesh(new THREE.BoxGeometry(0.07, 2.6, 0.07), p.woodLight), 0, 1.3, dz));
+  for (let y = 0.4; y < 1.5; y += 0.38) rails.add(at(mesh(new THREE.BoxGeometry(0.05, 0.05, 0.5), p.woodLight, false), 0, y, 0));
+  rails.position.set(ld.x + 0.12, floorY, ld.z);
+  rails.rotation.z = -0.16;
+  g.add(rails);
+  for (let i = 0; i < 3; i++) {
+    const rung = at(mesh(new THREE.BoxGeometry(0.5, 0.05, 0.05), p.woodLight, false), ld.x - 0.5, floorY + 0.03 + i * 0.05, ld.z - 0.6 + i * 0.12);
+    rung.rotation.y = 0.3 + i * 0.2;
+    g.add(rung);
+  }
+
+  // 左手前：縄の束と、束ねた茅
+  const bd = prop('bundles');
+  for (let i = 0; i < 3; i++) {
+    g.add(at(mesh(new THREE.TorusGeometry(0.22, 0.05, 5, 12).rotateX(Math.PI / 2), p.rope), bd.x + 0.15, floorY + 0.05 + i * 0.09, bd.z - 0.25));
+  }
+  for (let i = 0; i < 3; i++) {
+    const b = at(mesh(new THREE.CylinderGeometry(0.16, 0.19, 0.9, 7), p.thatch), bd.x - 0.15 + i * 0.05, floorY + 0.45, bd.z + 0.2 + (i - 1) * 0.2);
+    b.rotation.x = -0.15 + i * 0.12;
+    g.add(b);
+  }
+
+  // 床の木屑（作業の途中の気配）
+  const rand = createRandom(611);
+  for (let i = 0; i < 14; i++) {
+    const chip = at(mesh(new THREE.BoxGeometry(0.08 + rand() * 0.08, 0.012, 0.03 + rand() * 0.03), p.woodLight, false), bench.x - 0.6 + rand() * 1.4, floorY + 0.01, bench.z + 0.5 + rand() * 0.6);
+    chip.rotation.y = rand() * Math.PI;
+    g.add(chip);
+  }
 }

@@ -276,17 +276,24 @@ describe('人物の見分けやすさ', () => {
     for (const v of VILLAGER_LOOKS) expect(sat(v.cloth)).toBeLessThan(minNamed);
   });
 
-  it('人物のモデルは部位ごとにまとめられ、一人あたりの描画は 8 回以内（全員が同じマテリアル）', () => {
+  it('人物の体は一つのスキンメッシュ（全員が同じマテリアル）で、一人あたりの描画は体と足元の影の 2 回（Phase 6.5）', () => {
     for (const look of [PLAYER_APPEARANCE, ...Object.values(CHARACTERS).map((c) => c.appearance), ...VILLAGER_LOOKS]) {
       const rig = createPersonRig(look);
       let visible = 0;
       rig.root.traverseVisible((o) => {
         if (o instanceof THREE.Mesh) visible++;
       });
-      expect(visible).toBeLessThanOrEqual(8);
+      expect(visible).toBeLessThanOrEqual(2);
+      const skinned: THREE.SkinnedMesh[] = [];
       rig.root.traverse((o) => {
-        if (o instanceof THREE.Mesh) expect(o.material).toBe(personMaterial());
+        if (o instanceof THREE.SkinnedMesh) skinned.push(o);
+        // 足元の影以外（体・手に持つ物）は、全員共通の頂点色のマテリアル
+        if (o instanceof THREE.Mesh && o.name !== 'contact-shadow') expect(o.material).toBe(personMaterial());
       });
+      expect(skinned).toHaveLength(1);
+      // 膝と顔（目・口・眉）の骨がある
+      const names = skinned[0]!.skeleton.bones.map((b) => b.name);
+      for (const n of ['leftShin', 'rightShin', 'eyes', 'mouth', 'brows']) expect(names).toContain(n);
     }
   });
 });

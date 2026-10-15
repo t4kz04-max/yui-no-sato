@@ -1968,3 +1968,28 @@ summary {
 .plan-compare-table {
   font-size: var(--fs-m);
 }
+
+/* 住民の頭上の名前（Phase 6.5）：控えめに、景観を損ねない */
+.name-tags {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.name-tag {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 1px 9px;
+  font-size: var(--fs-s);
+  color: var(--hud-text);
+  background: rgba(24, 20, 16, 0.55);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+#hud.is-dialogue .name-tags,
+#hud.is-overlay .name-tags,
+#hud.is-title .name-tags {
+  display: none;
+}

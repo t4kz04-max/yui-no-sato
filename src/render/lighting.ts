@@ -25,9 +25,10 @@ export function setupLighting(scene: THREE.Scene): Lighting {
   scene.fog = new THREE.Fog(SKY_HORIZON, 85, 300);
   scene.add(createSkyDome(horizon, new THREE.Color(SKY_ZENITH)));
 
-  const sky = new THREE.HemisphereLight(0xd8e6ff, 0x6b5638, 1.15);
+  // 地面からの照り返しは暖かく。軒下の木組みが暗く潰れないよう、Phase 6.5 で少し明るくした
+  const sky = new THREE.HemisphereLight(0xd8e6ff, 0x8a6e48, 1.15);
   scene.add(sky);
-  scene.add(new THREE.AmbientLight(0xfff0d8, 0.25));
+  scene.add(new THREE.AmbientLight(0xfff0d8, 0.32));
 
   const sun = new THREE.DirectionalLight(0xffdcae, 2.6);
   sun.position.set(-48, 52, 44);

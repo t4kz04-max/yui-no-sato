@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { damp } from '../core/math';
-import { applyPose, createPersonRig, type PersonAppearance, type PersonRig } from '../characters/personRig';
+import { applyFace, applyPose, createPersonRig, type PersonAppearance, type PersonRig } from '../characters/personRig';
+import { FaceAnimator } from '../characters/face';
 import { blendPose, idlePose, neutralPose, walkPose } from '../characters/poses';
 import { speedOf, type PlayerState } from './PlayerController';
 
@@ -32,6 +33,8 @@ export class PlayerView {
   private time = 0;
   private steps = 0;
   private lastStep = 0;
+  /** まばたき（Phase 6.5。主人公は話す声を出さないので口は動かさない）。 */
+  private readonly face = new FaceAnimator(0.37);
 
   constructor() {
     this.rig = createPersonRig(PLAYER_APPEARANCE);
@@ -68,6 +71,7 @@ export class PlayerView {
     // 歩き出しはすぐに、止まるときは少しだけ滑らかに
     blendPose(this.pose, target, damp(moving ? 25 : 8, dt));
     applyPose(this.rig, this.pose);
+    applyFace(this.rig, this.face.update(dt, false, false));
   }
 
   /** 前回から足が地面に着いた回数を取り出す（足音を鳴らす）。 */
