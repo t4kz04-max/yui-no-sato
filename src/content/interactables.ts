@@ -74,7 +74,8 @@ export const INTERACTABLES: readonly Interactable[] = [
     dialogue: 'saeRoof',
     location: 'saeHouse',
     position: { x: -4, z: 9.9 },
-    range: 2.8,
+    // 屋根は見上げて調べる物なので、真下まで行かなくても、広場の西側から家へ近づけば調べられる（Phase 7・U02）
+    range: 4.0,
     markerHeight: 2.6,
     // 調べている間は、広場から南面の傷んだ所（西寄り）を見上げる（Phase 6.5）
     view: { pos: { x: -3.2, z: 19, y: 2.5 }, look: { x: -4.2, y: 9.2, z: 3.5 } },
@@ -102,7 +103,8 @@ export const INTERACTABLES: readonly Interactable[] = [
   {
     kind: 'object',
     id: 'planTable',
-    label: '作業台',
+    // 室内の作業台と紛らわしくないよう、段取りを考える台であることが分かる名前にする（Phase 7・15）
+    label: '段取りの作業台',
     dialogue: 'planTable',
     opens: 'plan',
     location: 'soheiWorkshop',

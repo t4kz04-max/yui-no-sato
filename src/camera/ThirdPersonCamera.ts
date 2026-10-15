@@ -40,7 +40,11 @@ export class ThirdPersonCamera {
   lookHeight = 2.3;
   /** 遮蔽物からカメラを離す余白。 */
   collisionPadding = 0.35;
-  minCollisionDistance = 0.9;
+  /**
+   * 遮蔽物に寄るときの最小距離。大きいと、壁際でカメラが壁の向こうへ押し出されて壁しか見えなくなるので、
+   * 主人公の側に留まる短い距離にする（近いときは主人公を半透明にする。Phase 7・H01）。
+   */
+  minCollisionDistance = 0.35;
   /** 上下角・距離の範囲（屋内では近め・低めにする。Phase 5.5）。 */
   limits: OrbitLimits = DEFAULT_ORBIT_LIMITS;
   /** 視点の感度など（設定画面で変わる）。 */

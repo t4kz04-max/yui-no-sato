@@ -144,6 +144,18 @@ export function forecastPlan3(plan: PlanSpec, q: StoryQuery): ForecastLine[] {
   ];
 }
 
+/** 第3幕の案を一文で表す（相談・決定の直前に出す。Phase 7・U05）。 */
+export function planSentence3(plan: PlanSpec): string {
+  if (plan.timing === 'nextYear') return '伊助家の屋根は今年は葺かず、来年に向けて相談を続ける。';
+  const sae =
+    plan.saeHelp === 'roofTop'
+      ? 'サエ家には、記録どおり屋根の上の仕事を頼む'
+      : plan.saeHelp === 'ground'
+        ? 'サエ家には、下の仕事（茅の受け渡し・片付け）を頼む'
+        : 'サエ家には頼まず、村の人たちの手で葺く';
+  return `今年の秋に伊助家の屋根を葺く。${sae}。`;
+}
+
 /** 第3幕の案の要点（作業台で見比べる。知っている情報の分だけ見通せる）。 */
 export function glancePlan3(plan: PlanSpec, q: StoryQuery): GlanceLine[] {
   const injuredKnown = evaluate(knows('sae.later', 'injured'), q);

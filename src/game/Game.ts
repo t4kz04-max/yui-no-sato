@@ -31,15 +31,15 @@ import { StoryState } from '../story/StoryState';
 import { CONSENT_LABEL } from '../story/types';
 import { InteractionSystem } from '../interaction/InteractionSystem';
 import { InteractionMarker } from '../interaction/InteractionMarker';
-import { actionLabel, type Interactable } from '../interaction/types';
+import { promptState, type Interactable } from '../interaction/types';
 import { CHARACTERS, VILLAGER_LOOKS, type CharacterId } from '../content/characters';
 import { npcStyle, roofDayStage, roofStates } from '../content/staging';
 import { RoofDayScene } from '../world/RoofDayScene';
 import { southSideOf } from '../world/World';
 import { BUILDINGS } from '../world/layout';
-import { DIALOGUES } from '../content/dialogues';
+import { DIALOGUES, PLAN_SUMMARY } from '../content/dialogues';
 import { INTERACTABLES, NPCS, npcColliders } from '../content/interactables';
-import { currentObjective } from '../content/objectives';
+import { currentObjective, currentObjectiveDetail } from '../content/objectives';
 import { HOUSEHOLDS, STORY_DEFS } from '../content/story';
 import { LEDGER_NOTE, LEDGER_TITLE } from '../content/ledger';
 import { buildLedger, buildNotebook, type JournalSources } from '../journal/models';
@@ -76,6 +76,7 @@ import { AudioEngine, type UiSound } from '../audio/AudioEngine';
 import { ambientMix, duckFactor, footstepSurface, musicMood, workSound } from '../audio/mix';
 import { CHARS_PER_SECOND, SettingsStore, effectiveVolumes, type Settings } from '../settings/settings';
 import { selectHint, type HintId } from './hints';
+import { NoticeQueue, type Notice } from './noticeQueue';
 import { TitleScreen } from '../ui/TitleScreen';
 import { SettingsView } from '../ui/SettingsView';
 import { HistoryView } from '../ui/HistoryView';
@@ -85,8 +86,8 @@ import { NameTags } from '../ui/NameTags';
 import { buildHistory, type HistorySources } from '../journal/historyModel';
 import { unlockedOptions } from '../journal/planModels';
 import { roofDayArrival, roofDayBarks, roofDayProgress, roofDayWork } from '../content/staging';
-import { glancePlan } from '../content/plan';
-import { glancePlan3 } from '../content/plan3';
+import { glancePlan, planSentence } from '../content/plan';
+import { glancePlan3, planSentence3 } from '../content/plan3';
 import { isInsideWorkshop } from '../world/workshop';
 import { CHAPTER_LABEL } from '../story/types';
 
@@ -225,7 +226,7 @@ export class Game {
   private uiMode: UiMode = 'explore';
   private area: LocationId | null = null;
   /** 会話前のカメラの上下角と距離（会話後に戻す）。 */
-  private savedCamera: { pitch: number; distance: number; lookHeight: number } | null = null;
+  private savedCamera: { pitch: number; distance: number; lookHeight: number; yaw: number } | null = null;
   /** 手帳を最後に閉じた時点の記録の順番（これより新しいものに「新」を付ける）。 */
   private notebookSeenOrder = 0;
   /** お知らせ画面のボタンごとの処理。 */
@@ -252,6 +253,12 @@ export class Game {
   private afterTransition: (() => void) | null = null;
   /** 計画を決めた瞬間は、手帳・意向・約束の通知を出さない（決定の知らせにまとめる）。 */
   private quietNotices = false;
+  /** 会話中の通知を溜める（Phase 7・U03）。 */
+  private readonly notices = new NoticeQueue<UiSound>();
+  /** 会話の場面の切り替わりを見分ける（溜めた通知を出す時機）。 */
+  private lastNodeKey = '';
+  /** 会話を送った回数（操作案内）。 */
+  private dialogueAdvances = 0;
   /** 作業台で考えられる選択肢（発見で増えたら知らせる）。 */
   private knownOptions = new Set<string>();
   /** 屋根葺きの日に着いてからの時間（作業の進み具合）。 */
@@ -283,6 +290,7 @@ export class Game {
       onAdvance: () => this.advanceDialogue(),
       onChoose: (i) => {
         this.sound('confirm');
+        this.markHint('dialogueChoice');
         this.interaction.choose(i);
       },
       onHover: (i) => this.interaction.select(i),
@@ -414,7 +422,10 @@ export class Game {
   // ───────── イベントの接続 ─────────
 
   private bindEvents(): void {
-    const refreshObjective = () => this.hud.setObjective(currentObjective(this.story));
+    // 会話中は、目的表示・手帳の新着の更新も通知と一緒に遅らせる（返事を読む前に結果が分からないように。Phase 7・U03）
+    const refreshObjective = () => {
+      if (!this.notices.deferRefresh()) this.hud.setObjective(currentObjective(this.story));
+    };
     this.events.on('interactionStarted', ({ id }) => this.onInteractionStarted(id));
     this.events.on('interactionEnded', ({ id, cancelled }) => this.onInteractionEnded(id, cancelled));
     this.events.on('flagSet', refreshObjective);
@@ -426,28 +437,25 @@ export class Game {
       const def = STORY_DEFS.topics[topic];
       const person = def?.person ? `${CHARACTERS[def.person as CharacterId]?.name ?? def.person}：` : '';
       const summary = def?.stages.find((s) => s.id === stage)?.summary ?? def?.title ?? topic;
-      this.toasts.push(previous ? '手帳を更新' : '手帳に記録', person + summary);
       // その発見で作業台の選択肢が増えたら、意味を一行で添える（どの案かは作業台で確かめる）
       const options = unlockedOptions(this.story);
       const added = [...options].some((o) => !this.knownOptions.has(o));
       this.knownOptions = options;
-      if (added && this.story.planPhase() !== 'decided') {
-        this.toasts.push('作業台', '考えられる案が増えた（作業台で確かめられる）');
-        this.sound('discover');
-      } else this.sound('notebook');
+      const discover = added && this.story.planPhase() !== 'decided';
+      this.notify({ label: previous ? '手帳を更新' : '手帳に記録', text: person + summary, ...(discover ? {} : { sound: 'notebook' as const }) });
+      if (discover) this.notify({ label: '作業台', text: '考えられる案が増えた（作業台で確かめられる）', sound: 'discover' });
     });
     this.events.on('consentChanged', ({ npc, request, status }) => {
       this.refreshNotebookBadge();
       if (this.quietNotices) return;
       const who = CHARACTERS[npc as CharacterId]?.name ?? npc;
       const what = STORY_DEFS.requests[request]?.label ?? request;
-      this.toasts.push('意向', `${who}：${what}は「${CONSENT_LABEL[status]}」`);
+      this.notify({ label: '意向', text: `${who}：${what}は「${CONSENT_LABEL[status]}」` });
     });
     this.events.on('promiseRecorded', () => {
       this.refreshNotebookBadge();
       if (this.quietNotices) return;
-      this.toasts.push('約束', '新しい約束を書き留めた');
-      this.sound('promise');
+      this.notify({ label: '約束', text: '新しい約束を書き留めた', sound: 'promise' });
     });
     const refreshPlan = () => {
       refreshObjective();
@@ -458,9 +466,8 @@ export class Game {
     this.events.on('planResponded', ({ npc, status }) => {
       refreshPlan();
       const who = CHARACTERS[npc as CharacterId]?.name ?? npc;
-      this.toasts.push('相談', `${who}：今の案への返事は「${CONSENT_LABEL[status]}」`);
+      this.notify({ label: '相談', text: `${who}：今の案への返事は「${CONSENT_LABEL[status]}」`, sound: 'notebook' });
       this.refreshNotebookBadge();
-      this.sound('notebook');
     });
     this.events.on('flagSet', ({ flag }) => {
       if (flag === 'roofDay:ended') this.endDayAfterDialogue = true;
@@ -541,7 +548,28 @@ export class Game {
   }
 
   private refreshNotebookBadge(): void {
+    if (this.notices.deferRefresh()) return;
     this.hud.setNotebookBadge(buildNotebook(this.story, JOURNAL_SOURCES).latestOrder > this.notebookSeenOrder);
+  }
+
+  /** 通知を出す。会話中は、結果を伝える場面を読み終えるまで溜めておく（noticeQueue.ts。Phase 7・U03）。 */
+  private notify(n: Notice<UiSound>): void {
+    if (this.notices.push(n)) return;
+    this.showNotice_(n);
+  }
+
+  private showNotice_(n: Notice<UiSound>): void {
+    this.toasts.push(n.label, n.text);
+    if (n.sound) this.sound(n.sound);
+  }
+
+  /** 溜めた通知を出し、必要なら目的表示と手帳の新着を更新する。 */
+  private flushNotices(out: { notices: Notice<UiSound>[]; refresh: boolean }): void {
+    for (const n of out.notices) this.showNotice_(n);
+    if (out.refresh) {
+      this.hud.setObjective(currentObjective(this.story));
+      this.hud.setNotebookBadge(buildNotebook(this.story, JOURNAL_SOURCES).latestOrder > this.notebookSeenOrder);
+    }
   }
 
   // ───────── 毎フレームの更新 ─────────
@@ -641,7 +669,8 @@ export class Game {
     }
     // 室内の壁際などでカメラがすぐ後ろまで寄ったときは、主人公を半透明にする（消すと位置が分からなくなる）
     const d = this.cameraRig.currentDistance;
-    this.playerView.setOpacity(this.uiMode === 'title' ? 1 : d >= 1.7 ? 1 : Math.max(0.3, (d - 0.9) / 0.8));
+    // カメラがほぼ頭の位置まで寄ったら隠す（半透明の体が画面いっぱいに映らないように。Phase 7・H01）
+    this.playerView.setOpacity(this.uiMode === 'title' ? 1 : d >= 1.7 ? 1 : d < 0.6 ? 0 : Math.max(0.25, (d - 0.6) / 1.1));
     this.updateMarker(dt);
 
     if (this.uiMode === 'explore') this.updateExploreHelpers(dt, intent, look);
@@ -665,7 +694,11 @@ export class Game {
     const input = this.input;
     if (input.wasPressed('Escape')) this.dispatch('esc');
     else if (input.wasPressed('Tab')) this.dispatch('tab');
-    else if (input.wasPressed('KeyE')) this.interaction.interact();
+    else if (input.wasPressed('KeyE')) {
+      // 会話の最初の場面の効果も、通知は溜めておく
+      this.notices.begin();
+      if (!this.interaction.interact()) this.notices.end();
+    }
   }
 
   private handleTitleInput(): void {
@@ -713,7 +746,7 @@ export class Game {
     );
   }
 
-  private markHint(id: HintId): void {
+  private markHint(id: HintId | 'dialogueNext' | 'dialogueChoice'): void {
     const done = this.settingsStore.value.hintsDone;
     if (done.includes(id)) return;
     this.settingsStore.update({ hintsDone: [...done, id] });
@@ -1035,6 +1068,7 @@ export class Game {
     for (let i = 0; i < Math.min(choices, 9); i++) {
       if (input.wasPressed(`Digit${i + 1}`) || input.wasPressed(`Numpad${i + 1}`)) {
         this.sound('confirm');
+        this.markHint('dialogueChoice');
         this.interaction.choose(i);
         return;
       }
@@ -1064,13 +1098,33 @@ export class Game {
   /** 決定キー：文字送りの途中なら全文を出し、そうでなければ進める・選ぶ。 */
   private confirmDialogue(): void {
     if (this.dialogueBox.isRevealing) this.dialogueBox.revealAll();
-    else this.interaction.confirm();
+    else {
+      if ((this.interaction.view?.choices.length ?? 0) > 0) this.markHint('dialogueChoice');
+      else this.countDialogueAdvance();
+      this.interaction.confirm();
+    }
   }
 
   /** クリック：文字送りの途中なら全文を出し、そうでなければ送る（選択肢はクリックで選ぶ）。 */
   private advanceDialogue(): void {
     if (this.dialogueBox.isRevealing) this.dialogueBox.revealAll();
-    else this.interaction.advance();
+    else {
+      this.countDialogueAdvance();
+      this.interaction.advance();
+    }
+  }
+
+  /** 会話を送った回数（初めての会話の操作案内を、3 回送ったら出さない。Phase 7・U07）。 */
+  private countDialogueAdvance(): void {
+    if (++this.dialogueAdvances >= 3) this.markHint('dialogueNext');
+  }
+
+  /** 初めての会話で出す操作案内（送り方・選び方）。手引きを切っている・済んでいれば出さない。 */
+  private dialogueKeyHint(choosing: boolean): string | null {
+    const s = this.settingsStore.value;
+    if (!s.showHints) return null;
+    if (choosing) return s.hintsDone.includes('dialogueChoice') ? null : '↑↓・数字キーで選ぶ　E・Enter・クリックで決める';
+    return s.hintsDone.includes('dialogueNext') ? null : 'E・Enter・クリックで次へ（表示の途中で押すと全文）';
   }
 
   private onInteractionStarted(id: string): void {
@@ -1087,7 +1141,7 @@ export class Game {
     if (partner?.id !== id || partner.kind !== 'npc') return;
     // 住民との会話は、相手と自分が斜めに見える構図へ寄せる（設計書 L：会話時は人物が見やすい構図へ）
     const orbit = this.cameraRig.orbit;
-    this.savedCamera = { pitch: orbit.targetPitch, distance: orbit.targetDistance, lookHeight: this.cameraRig.lookHeight };
+    this.savedCamera = { pitch: orbit.targetPitch, distance: orbit.targetDistance, lookHeight: this.cameraRig.lookHeight, yaw: orbit.targetYaw };
     this.cameraRig.lookHeight = Math.min(this.cameraRig.lookHeight, TALK_CAMERA.lookHeight);
     const toPartner = Math.atan2(partner.position.x - this.player.x, partner.position.z - this.player.z);
     // 今のカメラ位置に近い側から回り込む
@@ -1153,6 +1207,9 @@ export class Game {
   }
 
   private onInteractionEnded(id: string, cancelled: boolean): void {
+    // 会話が終わったら、溜めた通知を出す（中断した場合も、それまでに確定したことを知らせる）
+    this.flushNotices(this.notices.end());
+    this.lastNodeKey = '';
     this.hud.setDialogueMode(false);
     this.dialogueBox.hide();
     this.restoreCamera();
@@ -1198,7 +1255,9 @@ export class Game {
     this.showNotice(
       {
         title: 'この段取りで決めますか？',
-        body: `${describePlan(this.story, draft)}
+        // 決める前に、案を一文で確かめる（誰に何を頼み、いつ、どの茅で、どこまで葺くか。Phase 7・U05）
+        body: `${this.story.activePlanId() === 'isukeRoof' ? planSentence3(draft) : planSentence(draft)}
+承知した人：${this.story.planInvolved().map((n) => CHARACTERS[n as CharacterId]?.name ?? n).join('・')}
 決めた後は変えられません。`,
         items: [
           { id: 'no', label: 'もう少し考える' },
@@ -1225,7 +1284,7 @@ export class Game {
       const decision = this.story.planDecision('roof');
       const promises = this.story.allPromises().slice(promisesBefore);
       const lines = [
-        decision ? `決めた段取り：${describePlan(this.story, decision.plan, 'roof')}` : '',
+        decision ? `決めた段取り：${planSentence(decision.plan)}` : '',
         '関係する皆が承知し、屋根葺きの準備が整った。',
         ...promises.map((p) => `約束を書き留めた：${p.content}`),
       ].filter((l) => l !== '');
@@ -1355,6 +1414,8 @@ export class Game {
     orbit.targetPitch = this.savedCamera.pitch;
     orbit.targetDistance = this.savedCamera.distance;
     this.cameraRig.lookHeight = this.savedCamera.lookHeight;
+    // 会話の前の向きへ滑らかに戻す（会話の後に、歩く向きが変わって方角を見失わないように。Phase 7）
+    orbit.targetYaw = orbit.yaw + wrapAngle(this.savedCamera.yaw - orbit.yaw);
     this.savedCamera = null;
   }
 
@@ -1379,9 +1440,10 @@ export class Game {
   private pauseContent(status = ''): MenuContent {
     const decided = this.story.planDecision('roof') !== null;
     const objective = currentObjective(this.story);
+    const detail = currentObjectiveDetail(this.story);
     return {
       title: 'ポーズ',
-      ...(objective ? { body: `いまできること：${objective}` } : {}),
+      ...(objective ? { body: `いまできること：${objective}` + (detail ? `\n（${detail}）` : '') } : {}),
       items: [
         { id: 'resume', label: '再開する［Esc］' },
         { id: 'notebook', label: '手帳を開く［Tab］' },
@@ -1530,6 +1592,7 @@ export class Game {
     this.marker.update(dt);
   }
 
+/**   * 相談の直前に出す、案の要約（Phase 7・U05）。誰に何を頼み、いつ、どの茅で、どこまで葺くか。   * このあと返事を聞く人（今話している人を除く、まだ相談していない人）も添える。   */  private planSummaryText(partnerId: string): string {    const planId = this.story.activePlanId();    const draft = this.story.planDraft();    if (!planId || !draft) return '（作業台でまとめた案を話した。）';    const sentence = planId === 'roof' ? planSentence(draft) : planSentence3(draft);    const pending = this.story      .planInvolved()      .filter((npc) => npc !== partnerId && this.story.isPlanPending(npc))      .map((npc) => CHARACTERS[npc as CharacterId]?.name ?? npc);    return `案：${sentence}${pending.length > 0 ? `（このあと ${pending.join('・')} にも返事を聞く）` : ''}`;  }
   /** 住民の頭上の名前：探索中、6〜16m の距離にいる人だけ（近くでは案内表示と重ならないよう出さない）。 */
   private updateNameTags(): void {
     const items: Array<{ id: string; name: string; x: number; y: number; opacity: number }> = [];
@@ -1557,6 +1620,14 @@ export class Game {
     const partner = this.interaction.partner;
     if (view && partner) {
       // ページが変わったら、控えめに紙を送る音
+      // 場面が変わったら、前の場面を読み終えたとみなして、溜めた通知を出す（間の場面＝分岐するだけの場面では出さない）
+      const nodeKey = `${view.scriptId}:${view.nodeId}`;
+      if (nodeKey !== this.lastNodeKey) {
+        const [prevScript, prevNode] = this.lastNodeKey.split(':');
+        const prev = prevScript && prevNode ? DIALOGUES[prevScript]?.nodes[prevNode] : undefined;
+        this.flushNotices(this.notices.nodeChanged(prev !== undefined && !prev.branches?.length));
+        this.lastNodeKey = nodeKey;
+      }
       const key = `${view.scriptId}:${view.nodeId}:${view.page}`;
       if (key !== this.lastDialogueKey) {
         if (this.lastDialogueKey !== '') this.sound('page');
@@ -1567,13 +1638,15 @@ export class Game {
         key: `${view.scriptId}:${view.nodeId}:${view.page}`,
         speakerName: speaker,
         ...(partner.kind === 'object' ? { subject: partner.label } : {}),
-        text: view.text,
+        text: view.text === PLAN_SUMMARY ? this.planSummaryText(partner.id) : view.text,
         choices: view.choices.map((c) => c.text),
         selected: this.interaction.selected,
       });
       this.dialogueBox.update(dt);
+      this.dialogueBox.setKeyHint(this.dialogueKeyHint(view.choices.length > 0 && !this.dialogueBox.isRevealing));
     } else {
       this.lastDialogueKey = '';
+      this.lastNodeKey = '';
       if (this.dialogueBox.visible) this.dialogueBox.hide();
     }
 
@@ -1593,7 +1666,7 @@ export class Game {
     const sx = (this.projected.x * 0.5 + 0.5) * canvas.clientWidth;
     const sy = (-this.projected.y * 0.5 + 0.5) * canvas.clientHeight;
     this.prompt.show(
-      { key: target.id, action: actionLabel(target), label: target.label, done: this.interaction.isCompleted(target) },
+      { key: `${target.id}:${evaluate(SAE_HOUSE_OPEN, this.story)}`, label: target.label, ...promptState(target, this.interaction.isCompleted(target), evaluate(SAE_HOUSE_OPEN, this.story)) },
       sx,
       sy,
     );

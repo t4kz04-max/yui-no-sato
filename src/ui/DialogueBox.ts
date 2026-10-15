@@ -37,6 +37,8 @@ export class DialogueBox {
   private readonly nameEl: HTMLElement;
   private readonly textEl: HTMLElement;
   private readonly nextEl: HTMLElement;
+  /** 初めての会話の操作案内（Phase 7・U07）。 */
+  private readonly keyHintEl: HTMLElement;
   private readonly choicesEl: HTMLElement;
   private model: DialogueBoxModel | null = null;
   private shown = 0;
@@ -58,7 +60,9 @@ export class DialogueBox {
     this.nextEl = el('div', 'dialogue-next');
     this.nextEl.textContent = '▼';
     this.choicesEl = el('div', 'dialogue-choices');
-    box.append(this.nameEl, this.textEl, this.nextEl);
+    this.keyHintEl = el('div', 'dialogue-keyhint');
+    this.keyHintEl.hidden = true;
+    box.append(this.nameEl, this.textEl, this.nextEl, this.keyHintEl);
     this.layer.append(this.choicesEl, box);
     parent.append(this.layer);
 
@@ -111,6 +115,12 @@ export class DialogueBox {
     this.layer.hidden = true;
     this.choicesEl.replaceChildren();
     this.renderedChoicesKey = '';
+  }
+
+  /** 操作案内（null で隠す）。 */
+  setKeyHint(text: string | null): void {
+    if (this.keyHintEl.textContent !== (text ?? '')) this.keyHintEl.textContent = text ?? '';
+    this.keyHintEl.hidden = text === null;
   }
 
   revealAll(): void {

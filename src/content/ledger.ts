@@ -70,7 +70,7 @@ export const LEDGER: readonly LedgerEntry[] = [
         kind: 'material',
         detail: '茅 三十束',
         settlement: 'settled',
-        settlementNote: '七年前、ミネ家の屋根葺きに茅三十束を出して返した（L2）。',
+        settlementNote: '七年前、ミネ家の屋根葺きに茅三十束を出して返した（下の「七年前の秋」の記録）。',
       },
       {
         id: 'L1-sohei',

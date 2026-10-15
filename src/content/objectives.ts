@@ -8,6 +8,8 @@ import { SAE_HOUSE_OPEN } from './house';
 export interface ObjectiveDef {
   readonly when?: Condition;
   readonly text: string;
+  /** 補足（ポーズ画面に出す。右上の目的は短く保つ。Phase 7・H02）。 */
+  readonly detail?: string;
 }
 
 export const OBJECTIVES: readonly ObjectiveDef[] = [
@@ -26,7 +28,8 @@ export const OBJECTIVES: readonly ObjectiveDef[] = [
   { when: not(flag('talked:sae')), text: 'サエ家を訪ねる' },
   { when: planPhase('revise'), text: '返事をふまえて、作業台で案を見直す' },
   { when: planPhase('pending'), text: '作業台でまとめた案を、関係する人に相談する' },
-  { when: planPhase('ready'), text: '全員が承知した。作業台で計画を決める（決めると変えられない）' },
+  // 右上の目的は短く、補足はポーズ画面に出す（Phase 7・H02。決めると変えられないことは決定の確認でも示す）
+  { when: planPhase('ready'), text: '全員が承知した。作業台で計画を決める', detail: '決めた段取りは、あとから変えられない' },
   { when: not(flag('talked:isuke')), text: '伊助に屋根葺きの手伝いを相談する' },
   { when: notYet('isuke.availability', 'harvest'), text: '伊助が断った理由を探る' },
   // Phase 5.5：結帳はサエ家の室内。まずサエに頼んで上がらせてもらう
@@ -38,4 +41,9 @@ export const OBJECTIVES: readonly ObjectiveDef[] = [
 
 export function currentObjective(state: StoryQuery, list: readonly ObjectiveDef[] = OBJECTIVES): string {
   return list.find((o) => evaluate(o.when, state))?.text ?? '';
+}
+
+/** 今の目的の補足（なければ空）。 */
+export function currentObjectiveDetail(state: StoryQuery, list: readonly ObjectiveDef[] = OBJECTIVES): string {
+  return list.find((o) => evaluate(o.when, state))?.detail ?? '';
 }

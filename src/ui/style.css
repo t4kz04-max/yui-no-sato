@@ -107,7 +107,8 @@ summary {
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
-  max-width: min(420px, calc(100% - 32px));
+  /* 左上のタイトル（約 210px）と重ならない幅に抑える（Phase 7・H02） */
+  max-width: min(420px, calc(100% - 290px));
 }
 
 .hud-title,
@@ -1992,4 +1993,44 @@ summary {
 #hud.is-overlay .name-tags,
 #hud.is-title .name-tags {
   display: none;
+}
+
+/* 初めての会話の操作案内（Phase 7・U07） */
+.dialogue-keyhint {
+  margin-top: 8px;
+  font-size: var(--fs-s);
+  color: var(--hud-sub);
+  text-align: right;
+}
+
+/* Phase 7・H02：目的の折り返しで、最後の一文字だけが次の行に残らないように。地名は目的・通知の下に出す */
+.hud-objective-text {
+  text-wrap: pretty;
+}
+
+.hud-area {
+  top: 24%;
+}
+
+/* 狭い画面（幅 760px 以下）：タイトルを小さな一行にして、目的の列の幅を確保する（文字の大きさは変えない） */
+@media (max-width: 760px) {
+  .hud-title-sub {
+    display: none;
+  }
+  .hud-right {
+    max-width: min(420px, calc(100% - 170px));
+  }
+}
+
+/* Phase 7・U08：狭い画面でもキー名を割らない。手帳のタブは横スクロールではなく折り返す */
+.hud-hint kbd,
+.title-controls kbd {
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .notebook-tabs {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
 }

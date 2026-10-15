@@ -1292,7 +1292,7 @@ check('[P5] 再読み込み後も、第3幕の屋根の見た目と、サエの�
     return { visible: p.visible, opacity, cam: [c.x, c.y, c.z], dist: g.cameraRig.currentDistance, floor: g.player.y };
   });
   check('[P6] 室内の壁際でも、主人公は消えずに見え、カメラは室内に収まる',
-    c1.visible && c1.opacity >= 0.3 && Math.abs(c1.cam[0]) < 8.1 && c1.cam[2] > -5.7 && c1.cam[2] < 5.7 && c1.cam[1] < c1.floor + 3.4, JSON.stringify(c1));
+    c1.visible && c1.opacity >= 0.25 && Math.abs(c1.cam[0]) < 8.1 && c1.cam[2] > -5.7 && c1.cam[2] < 5.7 && c1.cam[1] < c1.floor + 3.4, JSON.stringify(c1));
   await page.screenshot({ path: `${OUT}/shot-64-p6-indoor-wall.png` });
   await leaveSaeHouse();
 
@@ -1439,6 +1439,106 @@ check('[P5] 再読み込み後も、第3幕の屋根の見た目と、サエの�
   await wait(1200);
   const tags = await page.evaluate(() => [...document.querySelectorAll('.name-tag')].filter((t) => !t.hidden).map((t) => t.textContent));
   check('[P6.5] 少し離れた住民の頭上に名前が出る（人だけ）', tags.includes('トキ') || tags.includes('サエ'), JSON.stringify(tags));
+}
+
+// ───────── Phase 7：第三者プレイテストの指摘（通常のプレイでも起きるもの）の確認 ─────────
+{
+  await page.evaluate(() => localStorage.clear());
+  await page.reload({ waitUntil: 'networkidle0' });
+  await wait(2000);
+  await startFromTitle('new');
+  const toastsNow = () => page.evaluate(() => [...document.querySelectorAll('.toast')].map((t) => t.textContent).join(' / '));
+
+  // U07：初めての会話では、送り方のキーが会話ウィンドウに出る
+  await place(-3, 20.4, Math.PI);
+  await waitFor((u) => u.target === 'toki', 6000);
+  await press('KeyE', (u) => u.dialogueVisible);
+  await wait(1500);
+  const kh = await page.evaluate(() => { const e = document.querySelector('.dialogue-keyhint'); return e && !e.hidden ? e.textContent : null; });
+  check('[P7] 初めての会話で、送り方のキー（E・Enter・クリック）が会話ウィンドウに出る', !!kh && /E・Enter/.test(kh), String(kh));
+  await page.screenshot({ path: `${OUT}/shot-80-p7-dialogue-keyhint.png` });
+  await finishDialogue();
+
+  // U06：入る許しがない間、サエ家の入口は「調べる」で、調べても「済」は付かない
+  await place(0, 8.3, Math.PI);
+  await waitFor((u) => u.target === 'saeDoor');
+  await wait(300);
+  const pd1 = await page.evaluate(() => document.querySelector('.interaction-prompt')?.textContent ?? '');
+  await press('KeyE', (u) => u.dialogueVisible);
+  await finishDialogue();
+  await place(0, 8.3, Math.PI);
+  await waitFor((u) => u.target === 'saeDoor');
+  await wait(300);
+  const pd2 = await page.evaluate(() => document.querySelector('.interaction-prompt')?.textContent ?? '');
+  check('[P7] 入る許しがない間、サエ家の入口は「調べる」と出て、調べても「済」は付かない', /調べる/.test(pd1) && !/入る/.test(pd1) && !/済/.test(pd2), `${pd1} → ${pd2}`);
+
+  // U03：案を相談すると、返事の通知は「しばらく案を見つめていた」より後に出る
+  await page.evaluate(() => {
+    const s = window.__yui.story;
+    for (const n of ['sae', 'sohei']) s.markMet(n);
+    for (const f of ['talked:toki', 'talked:sae', 'talked:sohei']) s.set(f);
+    s.learn('sae.schedule', 'needsHelp');
+    s.learn('sae.kaya', 'short');
+    s.setPlanDraft({ date: 'keep', isuke: 'none', offer: 'none', kaya: 'own', kayaReturn: 'none', soheiCover: 'none' });
+  });
+  await wait(4000); // ここまでの通知が消えるのを待つ
+  await place(...SPOT.sae);
+  await waitFor((u) => u.target === 'sae');
+  await press('KeyE', (u) => u.dialogueVisible);
+  let sawPause = false;
+  let earlyToast = '';
+  for (let i = 0; i < 40; i++) {
+    const u = await ui();
+    if (!u.dialogueVisible) break;
+    const t = await toastsNow();
+    if (/しばらく案を見つめていた|案を、サエさんに話した|案：/.test(u.text)) {
+      if (/しばらく案を見つめていた/.test(u.text)) sawPause = true;
+      if (/返事|承諾/.test(t)) earlyToast = `${u.text} | ${t}`;
+    }
+    if (u.choices.length > 0) {
+      const idx = u.choices.findIndex((c) => /作業台でまとめた案|この案でいいですか/.test(c.text));
+      await page.keyboard.press(`Digit${idx >= 0 ? idx + 1 : u.choices.length}`);
+    } else await page.keyboard.press('Space');
+    await wait(450);
+  }
+  await finishDialogue();
+  await wait(600);
+  const afterToast = await toastsNow();
+  check('[P7] 相談の返事（承諾）の通知は、「しばらく案を見つめていた」と返事を読む前には出ず、読んだ後に出る',
+    sawPause && earlyToast === '' && /承諾/.test(afterToast), JSON.stringify({ sawPause, earlyToast, afterToast }));
+
+  // H02：画面の大きさごとに、タイトル・目的・地名の表示が重ならない（長い目的を出した状態）
+  await page.evaluate(() => {
+    const s = window.__yui.story;
+    s.learn('sae.schedule', 'needsHelp');
+    for (const n of s.planInvolved()) s.consultPlan(n);
+  });
+  for (const [w, h] of [[1920, 1080], [1366, 768], [1280, 720], [1024, 640], [638, 572]]) {
+    await page.setViewport({ width: w, height: h });
+    await wait(700);
+    const ov = await page.evaluate(() => {
+      const g = window.__yui;
+      g.hud.showArea('宗平の作業場');
+      const r = (s) => document.querySelector(s)?.getBoundingClientRect();
+      const t = r('.hud-title');
+      const o = r('.hud-objective');
+      const a = r('.hud-area');
+      const hit = (p, q) => !!p && !!q && p.width > 0 && q.width > 0 && p.left < q.right && q.left < p.right && p.top < q.bottom && q.top < p.bottom;
+      return { titleObjective: hit(t, o), areaObjective: hit(a, o), objective: document.querySelector('.hud-objective-text')?.textContent, objWidth: Math.round(o?.width ?? 0) };
+    });
+    check(`[P7] ${w}x${h} 右上の目的がタイトル・地名の表示と重ならない`, !ov.titleObjective && !ov.areaObjective, JSON.stringify(ov));
+    if (w === 638) await page.screenshot({ path: `${OUT}/shot-81-p7-hud-638.png` });
+  }
+  await page.setViewport({ width: 1280, height: 720 });
+  await wait(600);
+
+  // H01：作業場の外壁のすぐ外で壁の方を向いても、カメラは壁の向こうへ出ない（主人公の側に留まる）
+  await place(4.55, -27, Math.PI / 2);
+  // カメラが壁の側（-X）に来る向き
+  await page.evaluate(() => { const o = window.__yui.cameraRig.orbit; o.yaw = o.targetYaw = Math.PI / 2; });
+  await wait(2500);
+  const cw = await page.evaluate(() => ({ x: window.__yui.camera.position.x, d: window.__yui.cameraRig.currentDistance }));
+  check('[P7] 外壁のすぐ外で壁の方を向いても、カメラは壁の向こうへ出ない', cw.x > 4.02, JSON.stringify(cw));
 }
 
 // 描画負荷（ソフトウェア描画のため FPS は参考にならない。描画呼び出し数で確認する）

@@ -11,6 +11,11 @@ import { boxWithWorldUv, markCameraBlocker, shadowed, type Palette } from './mat
  */
 
 const mesh = (geo: THREE.BufferGeometry, m: THREE.Material, cast = true) => shadowed(new THREE.Mesh(geo, m), cast);
+/** カメラの遮蔽物にして返す。 */
+const blocker = <T extends THREE.Object3D>(obj: T): T => {
+  markCameraBlocker(obj);
+  return obj;
+};
 const at = <T extends THREE.Object3D>(obj: T, x: number, y: number, z: number): T => {
   obj.position.set(x, y, z);
   return obj;
@@ -92,9 +97,11 @@ export function createWorkshop(p: Palette): THREE.Group {
     markCameraBlocker(part);
     g.add(at(part, side * (w / 2 - 0.8), 0.2 + wallH / 2, d / 2 - 0.1));
   }
-  g.add(at(mesh(new THREE.BoxGeometry(w + 0.2, 0.3, 0.3), p.woodDark, false), 0, 0.2 + wallH - 0.1, d / 2));
+  // 鴨居・柱・妻壁もカメラの遮蔽物にする（作業場に入れるようになり、カメラがこれらの向こうに回ると
+  // 横材や壁が画面を覆っていた。手前に寄せて、主人公との間に入らないようにする。Phase 7・H01）
+  g.add(at(blocker(mesh(new THREE.BoxGeometry(w + 0.2, 0.3, 0.3), p.woodDark, false)), 0, 0.2 + wallH - 0.1, d / 2));
   for (const x of [-w / 2, -w / 2 + 1.6, w / 2 - 1.6, w / 2]) {
-    g.add(at(mesh(new THREE.BoxGeometry(0.26, wallH, 0.26), p.woodDark, false), x, 0.2 + wallH / 2, d / 2));
+    g.add(at(blocker(mesh(new THREE.BoxGeometry(0.26, wallH, 0.26), p.woodDark, false)), x, 0.2 + wallH / 2, d / 2));
   }
   // 床と、中の材木・作業台
   g.add(at(mesh(new THREE.BoxGeometry(w - 0.4, 0.1, d - 0.4), p.woodWeathered, false), 0, 0.22, 0));
@@ -128,12 +135,12 @@ export function createWorkshop(p: Palette): THREE.Group {
   tri.lineTo(w / 2, 0);
   tri.closePath();
   for (const side of [1, -1]) {
-    const gable = mesh(new THREE.ShapeGeometry(tri), p.woodWall, false);
+    const gable = blocker(mesh(new THREE.ShapeGeometry(tri), p.woodWall, false));
     gable.position.set(0, 0.2 + wallH, side * (d / 2 - 0.02));
     if (side < 0) gable.rotation.y = Math.PI;
     g.add(gable);
     // 中から見た妻壁（中に入れるようになったので、内側にも面を向ける。Phase 6.5）
-    const inner = mesh(new THREE.ShapeGeometry(tri), p.woodWall, false);
+    const inner = blocker(mesh(new THREE.ShapeGeometry(tri), p.woodWall, false));
     inner.position.set(0, 0.2 + wallH, side * (d / 2 - 0.06));
     if (side > 0) inner.rotation.y = Math.PI;
     g.add(inner);

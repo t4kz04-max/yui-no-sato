@@ -65,3 +65,14 @@ export function completionFlag(def: Interactable): FlagId {
 export function sourceLabel(def: Interactable): string {
   return def.kind === 'npc' ? `${def.label}と話した` : `${def.label}を調べた`;
 }
+
+/**
+ * 案内表示の動詞と「済」（Phase 7・U06）。
+ * - 出入口は「済」を付けない（調べたことと入ったことを混同しない。何度でも出入りする所）。
+ * - サエ家の入口は、入る許しがない間は「調べる」（戸は閉まっている）、許しがあれば「入る」。
+ */
+export function promptState(def: Interactable, completed: boolean, houseOpen: boolean): { action: string; done: boolean } {
+  if (def.kind === 'object' && def.opens === 'enterHouse') return { action: houseOpen ? actionLabel(def) : '調べる', done: false };
+  if (def.kind === 'object' && def.opens === 'leaveHouse') return { action: actionLabel(def), done: false };
+  return { action: actionLabel(def), done: completed };
+}

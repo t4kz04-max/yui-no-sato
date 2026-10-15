@@ -2,6 +2,12 @@ import type { DialogueChoice, DialogueScript } from '../dialogue/types';
 import type { Condition } from '../story/conditions';
 import { SAE_HOUSE_OPEN } from './house';
 
+/**
+ * 相談の直前に、作業台で組んだ案の要約を出すページ（Phase 7・U05）。表示のときに Game が
+ * 案の一文（content/plan.ts の planSentence）と、このあと返事を聞く人に置き換える。
+ */
+export const PLAN_SUMMARY = '{plan}';
+
 /** 第1幕のあとの章でも、サエに結帳を見せてもらえるよう頼める（家に入れなくて詰まらないように。Phase 5.5）。 */
 const ASK_LEDGER_LATER: DialogueChoice = { text: '結帳を見せてもらえますか？', when: not(SAE_HOUSE_OPEN), next: 'ledgerOkLater' };
 import {
@@ -337,7 +343,7 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
         choices: [...SAE3_TOPICS, { text: '行ってきます' }],
       },
       planConsult3: {
-        lines: ['（伊助家の屋根葺きの案を、サエさんに話した。）'],
+        lines: ['（伊助家の屋根葺きの案を、サエさんに話した。）', PLAN_SUMMARY],
         choices: [{ text: 'この案でお願いできますか', effects: [consultPlan('sae')], next: 'planReact3' }, { text: 'やっぱり考え直します' }],
       },
       planReact3: {
@@ -418,6 +424,8 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
         speaker: 'sae',
         lines: [
           '隣の伊助さん、作業場の宗平さん、それに茅のことならミネさんね。',
+          // 伊助の居場所の手掛かりを少しだけ具体的に（目印や地図は足さない。Phase 7・U01）
+          '伊助さんの家は、うちの前から見て右手の奥。この時期は、家の向こうの畑に出ていることが多いわ。',
           'みんな忙しい時期だから、無理は言えないんだけど。段取りは宗平さんの作業台で考えるといいわ。',
         ],
         next: 'more',
@@ -444,7 +452,7 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
 
       // 計画の相談（サエは家主として、すべての案に返事をする）
       planConsult: {
-        lines: ['（作業台でまとめた案を、サエさんに話した。）'],
+        lines: ['（作業台でまとめた案を、サエさんに話した。）', PLAN_SUMMARY],
         choices: [
           { text: 'この案でいいですか？', effects: [consultPlan('sae')], next: 'planReact' },
           { text: 'やっぱり考え直します' },
@@ -567,7 +575,7 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
         choices: [...ISUKE3_TOPICS, { text: '失礼します' }],
       },
       planConsult3: {
-        lines: ['（伊助家の屋根葺きの案を、伊助さんに話した。）'],
+        lines: ['（伊助家の屋根葺きの案を、伊助さんに話した。）', PLAN_SUMMARY],
         choices: [{ text: 'この案でどうでしょう', effects: [consultPlan('isuke')], next: 'planReact3' }, { text: 'やっぱり考え直します' }],
       },
       planReact3: {
@@ -659,7 +667,7 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
 
       // 計画の相談
       planConsult: {
-        lines: ['（作業台でまとめた案を、伊助さんに話した。）'],
+        lines: ['（作業台でまとめた案を、伊助さんに話した。）', PLAN_SUMMARY],
         choices: [
           { text: 'この案で手伝ってもらえませんか', effects: [consultPlan('isuke')], next: 'planReact' },
           { text: '十二年前の手伝いを持ち出して頼む', when: knows('isuke.pastHelp'), next: 'pastAppeal' },
@@ -784,7 +792,7 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
 
       // 計画の相談（宗平は段取り役として、すべての案に返事をする）
       planConsult: {
-        lines: ['（作業台でまとめた案を、宗平さんに話した。）'],
+        lines: ['（作業台でまとめた案を、宗平さんに話した。）', PLAN_SUMMARY],
         choices: [{ text: 'この段取りで見てもらえますか', effects: [consultPlan('sohei')], next: 'planReact' }, { text: 'やっぱり考え直します' }],
       },
       planReact: {
@@ -917,7 +925,7 @@ export const DIALOGUES: Readonly<Record<string, DialogueScript>> = {
 
       // 計画の相談（茅を借りる・宗平の茅刈りを代わってもらう案のとき）
       planConsult: {
-        lines: ['（作業台でまとめた案を、ミネさんに話した。）'],
+        lines: ['（作業台でまとめた案を、ミネさんに話した。）', PLAN_SUMMARY],
         choices: [{ text: 'この案でお願いできますか', effects: [consultPlan('mine')], next: 'planReact' }, { text: 'やっぱり考え直します' }],
       },
       planReact: {

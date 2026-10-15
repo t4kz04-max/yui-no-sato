@@ -62,10 +62,15 @@ export function createSaeInterior(p: Palette, floorY: number): SaeInterior {
     add(mesh(new THREE.BoxGeometry(0.12, 0.05, b.maxZ - b.minZ), p.woodLight), x, H + 0.15, 0);
   }
   for (const z of [I.domaZ, -1.6, b.minZ + 0.3]) {
-    add(mesh(new THREE.BoxGeometry(w, 0.32, 0.26), p.woodDark), (b.minX + b.maxX) / 2, H, z);
+    // 梁もカメラの遮蔽物にする（カメラが梁の向こうに回って、梁が画面を横切らないように。Phase 7・H01）
+    const beam = add(mesh(new THREE.BoxGeometry(w, 0.32, 0.26), p.woodDark), (b.minX + b.maxX) / 2, H, z);
+    markCameraBlocker(beam);
+    blockers.push(beam);
   }
   for (const x of [I.oeWestX, I.partitionX]) {
-    add(mesh(new THREE.BoxGeometry(0.26, 0.3, b.maxZ - b.minZ), p.woodDark), x, H - 0.02, 0);
+    const beam = add(mesh(new THREE.BoxGeometry(0.26, 0.3, b.maxZ - b.minZ), p.woodDark), x, H - 0.02, 0);
+    markCameraBlocker(beam);
+    blockers.push(beam);
   }
 
   // ── 柱 ──
@@ -137,6 +142,9 @@ export function createSaeInterior(p: Palette, floorY: number): SaeInterior {
   // 火天：煤で黒い吊り板（火の粉を止める）
   const hiama = add(mesh(new THREE.BoxGeometry(1.7, 0.06, 1.7), sooty, true), ir.x, 2.25, ir.z);
   hiama.name = 'hiama';
+  // 吊り板の向こうにカメラが回ると、黒い板が画面を斜めに覆う。遮蔽物にして手前に寄せる（Phase 7・H01）
+  markCameraBlocker(hiama);
+  blockers.push(hiama);
   for (const [dx, dz] of [
     [-0.75, -0.75],
     [0.75, -0.75],

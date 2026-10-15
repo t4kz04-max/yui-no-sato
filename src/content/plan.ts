@@ -355,7 +355,9 @@ export function forecastPlan(plan: PlanSpec, q: StoryQuery): ForecastLine[] {
     lines.push(
       knowsHarvest
         ? line('伊助', '屋根葺きの日は刈り入れと重なる。来られない')
-        : line('伊助', '伊助の都合は分からない（断られた理由を知らない）', true),
+        : k(knows('isuke.availability'))
+          ? line('伊助', '伊助の都合は分からない（断られた理由をまだ知らない）', true)
+          : line('伊助', '伊助の都合は分からない（まだ本人に都合を聞いていない）', true),
     );
   } else if (!delayed) {
     lines.push(line('伊助', '前日の半日、刈り入れが止まる。天気が崩れれば稲が傷む恐れ' + (helps ? '。遅れはサエ家の手で取り戻す' : '')));
@@ -458,7 +460,8 @@ export function glancePlan(plan: PlanSpec, q: StoryQuery): GlanceLine[] {
   if (!delayed || covered) who.push('宗平');
   else if (knowsSoheiConflict) who.push('宗平は来られない');
   else {
-    who.push('宗平（来られるか分からない）');
+    // 都合をまだ聞いていないのか、聞いたが事情（理由）を知らないのかを分ける（Phase 7・U04）
+    who.push(k(knows('sohei.schedule')) ? '宗平（来られるか分からない）' : '宗平（都合をまだ聞いていない）');
     whoUncertain = true;
   }
   if (isuke === 'dayBefore') who.push('伊助（前日の準備）');
@@ -466,7 +469,7 @@ export function glancePlan(plan: PlanSpec, q: StoryQuery): GlanceLine[] {
   else if (isuke === 'dayOf') {
     if (knowsHarvest) who.push('伊助は来られない（刈り入れと重なる）');
     else {
-      who.push('伊助（来られるか分からない）');
+      who.push(k(knows('isuke.availability')) ? '伊助（来られるか分からない）' : '伊助（都合をまだ聞いていない）');
       whoUncertain = true;
     }
   }
@@ -490,9 +493,32 @@ export function glancePlan(plan: PlanSpec, q: StoryQuery): GlanceLine[] {
     g('when', when[0] as string, when[1] as boolean),
     g('scope', scope[0] as string, scope[1] as boolean),
     g('who', who.join('・'), whoUncertain),
-    g('burden', burden.length > 0 ? burden.join('／') : '特に重くなる人はいない', burdenUncertain),
+    // 負担が分からないのか、本当に増えないのかを分ける（事情を知らない人がいれば「まだ判断できない」。Phase 7・U04）
+    burden.length > 0
+      ? g('burden', burden.join('／'), burdenUncertain || whoUncertain)
+      : whoUncertain
+        ? g('burden', 'まだ判断できない（事情が分からない人がいる）', true)
+        : g('burden', '特に重くなる人はいない'),
     g('promises', promises.length > 0 ? promises.join('／') : '新しい約束は増えない', kaya === 'mine' && kayaReturn !== 'nextYearRecorded'),
   ];
+}
+
+// ───────── 案の要約（相談・決定の直前に出す短い文。Phase 7・U05） ─────────
+
+/**
+ * 案を一文で表す（誰に何を頼み、いつ、どの茅で、屋根のどこまでを葺くか）。
+ * 作業台に出ている選択肢の名前と説明だけから作る（知らない事情は書かない）。
+ */
+export function planSentence(plan: PlanSpec): string {
+  const { date, isuke, offer, kaya, kayaReturn, soheiCover } = plan;
+  const when = date === 'afterHarvest' ? '伊助家の刈り入れの後に延ばして' : '予定日に';
+  const ask = isuke === 'dayOf' ? '伊助に当日の手伝いを頼み' : isuke === 'dayBefore' ? '伊助に前日の準備（茅運びと足場）を頼み' : '伊助には頼まず';
+  const ret = kayaReturn === 'nextYearRecorded' ? '来年の秋に茅で返すと結帳に記す' : kayaReturn === 'nextYear' ? '来年の秋に茅で返す口約束' : '返しは手伝いで';
+  const roof = kaya === 'mine' ? `ミネ家から茅を借りて（${ret}）南面をすべて葺く` : 'サエ家の手持ちの茅で傷みのひどい所だけを葺く';
+  const extra: string[] = [];
+  if (offer === 'harvestHelp') extra.push('サエ家からは伊助家の刈り入れに人を出す。');
+  if (soheiCover === 'mineCovers') extra.push('宗平の茅刈りの段取りは、ミネに頼む。');
+  return `${when}、${ask}、${roof}。${extra.join('')}`;
 }
 
 // ───────── 結果 ─────────

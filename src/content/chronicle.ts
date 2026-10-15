@@ -67,7 +67,7 @@ export function ledgerEntries(story: StoryState): LedgerEntry[] {
         kind: 'labor',
         detail: '一人・一日（下の仕事：茅の受け渡し、片付け）',
         settlement: 'settled',
-        settlementNote: '十五年前の手伝いの返しとして（L1）。屋根の上ではないが、本人どうしで話して記した。',
+        settlementNote: '伊助家がサエ家の屋根葺きを手伝った、十五年前の記録への返しとして。屋根の上ではないが、本人どうしで話して記した。',
       });
     }
     entries.push({
